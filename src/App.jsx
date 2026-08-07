@@ -4,7 +4,7 @@ import { db } from "./firebaseClient";
 import {
   Plus, X, MapPin, Calendar, Package, ShoppingCart, ListChecks, Ticket,
   ArrowLeft, Archive, ExternalLink, Check, Menu, Trash2, Pencil, Download,
-  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight,
+  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart,
 } from "lucide-react";
 
 /* ============================== スタイル ============================== */
@@ -1134,6 +1134,86 @@ function TodoTab({ trip, updateTrip }) {
     </div>
   );
 }
+/* ============================== 行きたいところタブ ============================== */
+function WishlistTab({ trip, updateTrip }) {
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+
+  const list = trip.wishlist || [];
+  const setList = (l) => updateTrip({ ...trip, wishlist: l });
+
+  const add = () => {
+    if (!name.trim()) return;
+    setList([...list, { id: newId(), name: name.trim(), url: url.trim() }]);
+    setName(""); setUrl("");
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id); setEditName(item.name); setEditUrl(item.url || "");
+  };
+  const saveEdit = () => {
+    if (!editName.trim()) return;
+    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim() } : w)));
+    setEditingId(null);
+  };
+  const remove = (id) => { setList(list.filter((w) => w.id !== id)); setDeletingId(null); };
+
+  const openPlace = (item) => {
+    if (item.url) { window.open(item.url, "_blank"); return; }
+    openLocationLink(item.name, trip.mapProvider);
+  };
+
+  return (
+    <div className="tab-content">
+      <div className="mini-form">
+        <label className="field-label">場所の名前</label>
+        <input className="field-input" placeholder="名前(例:サント・シャペル)" value={name} onChange={(e) => setName(e.target.value)} />
+        <label className="field-label">地図のURL(任意)</label>
+        <input className="field-input" placeholder="地図のURLを貼り付け" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <div className="field-hint">URLを空欄にすると、場所の名前から自動で地図を検索して開きます</div>
+        <button className="btn-mini full" onClick={add}><Plus size={14} />行きたいところを追加</button>
+      </div>
+
+      <div className="card-list">
+        {list.length === 0 && <div className="empty-state"><Heart size={26} />行きたいところはまだありません</div>}
+        {list.map((item) =>
+          editingId === item.id ? (
+            <div className="mini-form" key={item.id}>
+              <label className="field-label">場所の名前</label>
+              <input className="field-input" value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <label className="field-label">地図のURL(任意)</label>
+              <input className="field-input" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
+              <div className="form-actions">
+                <button className="btn-mini full" onClick={saveEdit}>保存する</button>
+                <button className="btn-secondary full" onClick={() => setEditingId(null)}>やめる</button>
+              </div>
+            </div>
+          ) : deletingId === item.id ? (
+            <div className="mini-form" key={item.id}>
+              <ConfirmDelete message="削除しますか?" onConfirm={() => remove(item.id)} onCancel={() => setDeletingId(null)} />
+            </div>
+          ) : (
+            <div className="reservation-item" key={item.id}>
+              <div className="reservation-body" style={{ cursor: "pointer" }} onClick={() => startEdit(item)}>
+                <div className="reservation-name">{item.name}</div>
+                <div className="reservation-meta">
+                  <a href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPlace(item); }}>
+                    <MapPin size={11} />地図で開く<ExternalLink size={9} />
+                  </a>
+                </div>
+              </div>
+              <button className="icon-btn faint" onClick={() => setDeletingId(item.id)}><X size={16} /></button>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
 
 /* ============================== 予約タブ ============================== */
 function ReservationTab({ trip, updateTrip }) {
@@ -1203,6 +1283,7 @@ const TABS = [
   { key: "shopping", label: "買うもの", icon: ShoppingCart },
   { key: "todo", label: "やること", icon: ListChecks },
   { key: "reservation", label: "予約", icon: Ticket },
+  { key: "wishlist", label: "行きたいリスト", icon: Heart },
 ];
 
 function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onToggleArchive, showToast }) {
@@ -1262,6 +1343,7 @@ function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onTo
       )}
       {tab === "todo" && <TodoTab trip={trip} updateTrip={updateTrip} />}
       {tab === "reservation" && <ReservationTab trip={trip} updateTrip={updateTrip} />}
+      {tab === "wishlist" && <WishlistTab trip={trip} updateTrip={updateTrip} />}
 
       <div style={{ textAlign: "center", marginTop: 12 }}>
         {confirmingDelete ? (
