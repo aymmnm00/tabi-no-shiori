@@ -345,31 +345,14 @@ const CITY_TIMEZONES = [
 ];
 
 // 地図リンクを開く(Googleマップ / Citymapper 切り替え対応)
-// Citymapperは座標(緯度・経度)が必要なため、無料・登録不要のNominatim(OpenStreetMap)で
-// 地名 → 座標を調べてからリンクを組み立てる。
-// ポップアップブロック対策として、クリックした瞬間に空のタブを先に開き、
-// 座標が分かってから行き先を差し込む(調べられなければGoogleマップにフォールバックする)。
+// Citymapperは目的地名で直接開ける形式を使う(座標検索に頼らないため確実に動く)
 function openLocationLink(place, provider) {
   if (!place) return;
   if (provider === "citymapper") {
-    const tab = window.open("", "_blank");
-    (async () => {
-      try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`
-        );
-        const data = await res.json();
-        if (data && data[0]) {
-          const { lat, lon } = data[0];
-          const url = `https://citymapper.com/directions?endcoord=${lat},${lon}&endname=${encodeURIComponent(place)}`;
-          if (tab) tab.location.href = url;
-          return;
-        }
-      } catch (e) {
-        // 調べられなかった場合はGoogleマップにフォールバック
-      }
-      if (tab) tab.location.href = mapsUrl(place);
-    })();
+    window.open(
+      `https://citymapper.com/directions?endname=${encodeURIComponent(place)}&endaddress=${encodeURIComponent(place)}`,
+      "_blank"
+    );
     return;
   }
   window.open(mapsUrl(place), "_blank");
@@ -639,6 +622,7 @@ function TripFormPanel({ initial, onSave, onClose }) {
       shoppingList: initial?.shoppingList || [],
       todos: initial?.todos || { pre: [], during: [], post: [] },
       reservations: initial?.reservations || [],
+      wishlist: initial?.wishlist || [],
     });
   };
 
@@ -727,10 +711,31 @@ function TripFormPanel({ initial, onSave, onClose }) {
             />
             <button className="btn-mini" onClick={addMember} type="button"><Plus size={14} /></button>
           </div>
-          <div className="field-hint">丸いアイコンをタップすると、そのメンバーの写真を選べます(任意)</div>
-          <div className="chip-row" style={{ marginTop: 6 }}>
+          <div className="field-hint">丸いアイコンをタップすると写真を選べます(任意)。追加したメンバーの名前や写真は、下の一覧からいつでも変更できます</div>
+          <div className="card-list" style={{ marginTop: 8 }}>
             {members.map((m, i) => (
-              <MemberChip key={m.id || i} member={m} onRemove={() => setMembers(members.filter((_, idx) => idx !== i))} />
+              <div className="reservation-item" key={m.id || i}>
+                <label className="member-avatar-btn" style={{ width: 34, height: 34 }}>
+                  <MemberAvatar member={m} size={34} />
+                  <input
+                    type="file" accept="image/*" style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setMembers(members.map((x, idx) => (idx === i ? { ...x, photo: reader.result } : x)));
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+                <input
+                  className="field-input" value={m.name}
+                  onChange={(e) => setMembers(members.map((x, idx) => (idx === i ? { ...x, name: e.target.value } : x)))}
+                />
+                <button className="icon-btn faint" type="button" onClick={() => setMembers(members.filter((_, idx) => idx !== i))}>
+                  <X size={16} />
+                </button>
+              </div>
             ))}
           </div>
 
@@ -1134,6 +1139,7 @@ function TodoTab({ trip, updateTrip }) {
     </div>
   );
 }
+
 /* ============================== 行きたいところタブ ============================== */
 function WishlistTab({ trip, updateTrip }) {
   const [name, setName] = useState("");
@@ -1162,6 +1168,7 @@ function WishlistTab({ trip, updateTrip }) {
   };
   const remove = (id) => { setList(list.filter((w) => w.id !== id)); setDeletingId(null); };
 
+  // URLが入っていればそれを開く。無ければ場所名で地図を検索する。
   const openPlace = (item) => {
     if (item.url) { window.open(item.url, "_blank"); return; }
     openLocationLink(item.name, trip.mapProvider);
@@ -1198,10 +1205,13 @@ function WishlistTab({ trip, updateTrip }) {
             </div>
           ) : (
             <div className="reservation-item" key={item.id}>
-              <div className="reservation-body" style={{ cursor: "pointer" }} onClick={() => startEdit(item)}>
+              <div className="reservation-body clickable" style={{ cursor: "pointer" }} onClick={() => startEdit(item)}>
                 <div className="reservation-name">{item.name}</div>
                 <div className="reservation-meta">
-                  <a href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPlace(item); }}>
+                  <a
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPlace(item); }}
+                  >
                     <MapPin size={11} />地図で開く<ExternalLink size={9} />
                   </a>
                 </div>
@@ -1283,7 +1293,7 @@ const TABS = [
   { key: "shopping", label: "買うもの", icon: ShoppingCart },
   { key: "todo", label: "やること", icon: ListChecks },
   { key: "reservation", label: "予約", icon: Ticket },
-  { key: "wishlist", label: "行きたいリスト", icon: Heart },
+  { key: "wishlist", label: "行きたいところ", icon: Heart },
 ];
 
 function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onToggleArchive, showToast }) {
