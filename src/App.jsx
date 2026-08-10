@@ -175,6 +175,10 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .map-legend { display:flex; gap:14px; font-size:11.5px; align-items:center; flex-wrap:wrap; }
 .map-legend span { display:inline-flex; align-items:center; gap:5px; }
 .legend-dot { width:11px; height:11px; border-radius:50%; display:inline-block; }
+.wish-icon-picker { display:flex; flex-wrap:wrap; gap:5px; margin-top:2px; }
+.wish-icon-choice { font-size:16px; background:white; border:2px solid transparent; border-radius:10px; width:38px; height:38px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.wish-icon-choice.selected { border-color:var(--sky-deep); background:#E8F6FD; }
+.wish-item-icon { font-size:19px; flex-shrink:0; }
 .coord-missing { font-size:11px; color:#C25B3E; background:#FFE3DC; border-radius:999px; padding:2px 9px; font-weight:700; }
 `;
 
@@ -188,6 +192,21 @@ const CATEGORIES = [
   { key: "その他", bg: "#EEF0F2", fg: "#6B7280", dot: "#C9CED6" },
 ];
 const RESV_CATEGORIES = ["フライト", "ホテル", "レンタカー", "その他"];
+// 行きたいところのカテゴリ(地図のピンにもこの絵文字が出る)
+const WISH_ICONS = [
+  { icon: "☕", label: "カフェ" },
+  { icon: "🍽", label: "レストラン" },
+  { icon: "🍰", label: "スイーツ" },
+  { icon: "🍷", label: "バー" },
+  { icon: "🛍", label: "買い物" },
+  { icon: "🏨", label: "ホテル" },
+  { icon: "🏛", label: "観光地" },
+  { icon: "🎨", label: "美術館" },
+  { icon: "⛪", label: "教会" },
+  { icon: "🌳", label: "公園" },
+  { icon: "📷", label: "撮影スポット" },
+  { icon: "🌐", label: "その他" },
+];
 const TODO_PHASES = [
   { key: "pre", label: "旅行前" },
   { key: "during", label: "旅行中" },
@@ -1218,6 +1237,8 @@ function WishlistTab({ trip, updateTrip }) {
   const [editUrl, setEditUrl] = useState("");
   const [coord, setCoord] = useState("");
   const [editCoord, setEditCoord] = useState("");
+  const [icon, setIcon] = useState("🌐");
+  const [editIcon, setEditIcon] = useState("🌐");
 
   const list = trip.wishlist || [];
   const setList = (l) => updateTrip({ ...trip, wishlist: l });
@@ -1231,17 +1252,18 @@ function WishlistTab({ trip, updateTrip }) {
 
   const add = () => {
     if (!name.trim()) return;
-    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), ...parseCoord(coord) }]);
-    setName(""); setUrl(""); setCoord("");
+    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), icon, ...parseCoord(coord) }]);
+    setName(""); setUrl(""); setCoord(""); setIcon("🌐");
   };
 
   const startEdit = (item) => {
     setEditingId(item.id); setEditName(item.name); setEditUrl(item.url || "");
     setEditCoord(typeof item.lat === "number" ? `${item.lat}, ${item.lng}` : "");
+    setEditIcon(item.icon || "🌐");
   };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), ...parseCoord(editCoord) } : w)));
+    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), icon: editIcon, ...parseCoord(editCoord) } : w)));
     setEditingId(null);
   };
   const remove = (id) => { setList(list.filter((w) => w.id !== id)); setDeletingId(null); };
@@ -1255,6 +1277,17 @@ function WishlistTab({ trip, updateTrip }) {
   return (
     <div className="tab-content">
       <div className="mini-form">
+        <label className="field-label">種類</label>
+        <div className="wish-icon-picker">
+          {WISH_ICONS.map((w) => (
+            <button
+              key={w.icon} type="button" title={w.label}
+              className={`wish-icon-choice${icon === w.icon ? " selected" : ""}`}
+              onClick={() => setIcon(w.icon)}
+            >{w.icon}</button>
+          ))}
+        </div>
+
         <label className="field-label">場所の名前</label>
         <input className="field-input" placeholder="名前(例:サント・シャペル)" value={name} onChange={(e) => setName(e.target.value)} />
         <label className="field-label">地図のURL(任意)</label>
@@ -1271,6 +1304,17 @@ function WishlistTab({ trip, updateTrip }) {
         {list.map((item) =>
           editingId === item.id ? (
             <div className="mini-form" key={item.id}>
+              <label className="field-label">種類</label>
+              <div className="wish-icon-picker">
+                {WISH_ICONS.map((w) => (
+                  <button
+                    key={w.icon} type="button" title={w.label}
+                    className={`wish-icon-choice${editIcon === w.icon ? " selected" : ""}`}
+                    onClick={() => setEditIcon(w.icon)}
+                  >{w.icon}</button>
+                ))}
+              </div>
+
               <label className="field-label">場所の名前</label>
               <input className="field-input" value={editName} onChange={(e) => setEditName(e.target.value)} />
               <label className="field-label">地図のURL(任意)</label>
@@ -1394,7 +1438,7 @@ function MapTab({ trip, updateTrip }) {
   schedulePoints.forEach((p, i) => { p.num = i + 1; });
 
   const wishPoints = (trip.wishlist || []).map((w) => ({
-    name: w.name, place: w.name, lat: w.lat, lng: w.lng, kind: "wishlist",
+    name: w.name, place: w.name, lat: w.lat, lng: w.lng, kind: "wishlist", icon: w.icon || "🌐",
   }));
 
   const all = [...schedulePoints, ...wishPoints];
@@ -1429,9 +1473,9 @@ function MapTab({ trip, updateTrip }) {
         position: { lat: p.lat, lng: p.lng },
         map,
         label: {
-          text: isSchedule ? String(p.num) : "♥",
+          text: isSchedule ? String(p.num) : (p.icon || "🌐"),
           color: "#ffffff",
-          fontSize: "12px",
+          fontSize: isSchedule ? "12px" : "14px",
           fontWeight: "700",
         },
         icon: {
@@ -1495,7 +1539,7 @@ function MapTab({ trip, updateTrip }) {
 
       <div className="map-legend">
         <span><i className="legend-dot" style={{ background: "#3FA9E0" }} />番号=日程の予定</span>
-        <span><i className="legend-dot" style={{ background: "#FFB6B9" }} />♥=行きたいところ</span>
+        <span><i className="legend-dot" style={{ background: "#FFB6B9" }} />絵文字=行きたいところ</span>
       </div>
 
       <button className="btn-mini full" onClick={fillCoords} disabled={busy}>
