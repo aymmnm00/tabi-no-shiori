@@ -196,6 +196,9 @@ const RESV_CATEGORIES = ["フライト", "ホテル", "レンタカー", "その
 const WISH_ICONS = [
   { icon: "☕", label: "カフェ" },
   { icon: "🍽", label: "レストラン" },
+  { icon: "🥐", label: "パン" },
+  { icon: "🍫", label: "チョコ" },
+  { icon: "🍔", label: "ハンバーガー" },
   { icon: "🍰", label: "スイーツ" },
   { icon: "🍷", label: "バー" },
   { icon: "🛍", label: "買い物" },
