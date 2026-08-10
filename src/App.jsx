@@ -378,25 +378,34 @@ function openLocationLink(place, provider, coords) {
   if (!place) return;
 
   if (provider === "citymapper") {
-    const buildUrl = (c) =>
-      `https://citymapper.com/directions?endcoord=${c.lat}%2C${c.lng}&endname=${encodeURIComponent(place)}`;
+    const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
+    const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
 
-    // すでに座標が分かっていれば、そのまま開く
-    if (coords && typeof coords.lat === "number" && typeof coords.lng === "number") {
-      window.open(buildUrl(coords), "_blank");
+    // 座標が分かっていない場合は、Googleマップで開く(Citymapperは座標がないと目的地を認識しないため)
+    if (lat === null || lng === null) {
+      window.location.href = mapsUrl(place);
       return;
     }
 
-    // 分からなければ、先に空タブを開いてから調べる
-    const tab = window.open("", "_blank");
-    (async () => {
-      const c = await lookupCoords(place);
-      if (tab) tab.location.href = c ? buildUrl(c) : mapsUrl(place);
-    })();
+    // Citymapperアプリを直接呼び出す。アプリが無ければウェブ版に切り替わる。
+    const appUrl = `citymapper://directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`;
+    const webUrl = `https://citymapper.com/directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`;
+
+    let switched = false;
+    const onHide = () => { switched = true; };
+    document.addEventListener("visibilitychange", onHide, { once: true });
+
+    window.location.href = appUrl;
+
+    // アプリが開かなかった場合だけ、ウェブ版に飛ばす
+    setTimeout(() => {
+      document.removeEventListener("visibilitychange", onHide);
+      if (!switched && !document.hidden) window.location.href = webUrl;
+    }, 1200);
     return;
   }
 
-  window.open(mapsUrl(place), "_blank");
+  window.location.href = mapsUrl(place);
 }
 
 /* ============================== サンプルデータ ============================== */
