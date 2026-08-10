@@ -4,7 +4,7 @@ import { db } from "./firebaseClient";
 import {
   Plus, X, MapPin, Calendar, Package, ShoppingCart, ListChecks, Ticket,
   ArrowLeft, Archive, ExternalLink, Check, Menu, Trash2, Pencil, Download,
-  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart,
+  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart, Map,
 } from "lucide-react";
 
 /* ============================== スタイル ============================== */
@@ -171,6 +171,11 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .mini-form .field-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
 .confirm-delete { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; font-size:12px; }
 .print-note { font-size:11.5px; opacity:0.7; text-align:center; padding:10px 4px; }
+.map-canvas { width:100%; height:340px; border-radius:18px; overflow:hidden; box-shadow:0 3px 12px rgba(63,169,224,0.08); }
+.map-legend { display:flex; gap:14px; font-size:11.5px; align-items:center; flex-wrap:wrap; }
+.map-legend span { display:inline-flex; align-items:center; gap:5px; }
+.legend-dot { width:11px; height:11px; border-radius:50%; display:inline-block; }
+.coord-missing { font-size:11px; color:#C25B3E; background:#FFE3DC; border-radius:999px; padding:2px 9px; font-weight:700; }
 `;
 
 /* ============================== 定数 ============================== */
@@ -356,6 +361,20 @@ function openLocationLink(place, provider) {
     return;
   }
   window.open(mapsUrl(place), "_blank");
+}
+
+// 場所名から緯度・経度を自動で調べる(無料・登録不要のOpenStreetMap Nominatim)
+// 見つからなければ null を返す。その場合は手入力で補える。
+async function lookupCoords(place) {
+  if (!place) return null;
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`
+    );
+    const data = await res.json();
+    if (data && data[0]) return { lat: Number(data[0].lat), lng: Number(data[0].lon) };
+  } catch (e) { /* 失敗時はnull */ }
+  return null;
 }
 
 /* ============================== サンプルデータ ============================== */
@@ -770,6 +789,7 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
   const [arrivalIsLocalTime, setArrivalIsLocalTime] = useState(initial?.arrivalIsLocalTime || false);
   const [reservationNumber, setReservationNumber] = useState(initial?.reservationNumber || "");
   const [memo, setMemo] = useState(initial?.memo || "");
+  const [coord, setCoord] = useState(typeof initial?.lat === "number" ? `${initial.lat}, ${initial.lng}` : "");
 
   const canSave = time && title.trim();
 
@@ -781,6 +801,10 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
       title: title.trim(), category, location, arrivalLocation,
       arrivalIsLocalTime: endTime ? arrivalIsLocalTime : undefined,
       memo, reservationNumber, timeZone: intl ? timeZone : "jst",
+      ...(() => {
+        const m = coord.split(",").map((x) => Number(x.trim()));
+        return (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) ? { lat: m[0], lng: m[1] } : {};
+      })(),
     });
   };
 
@@ -839,6 +863,10 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
       <label className="field-label">メモ(任意)</label>
       <input className="field-input" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="例:徒歩15分、乗り換え案内など" />
       <div className="field-hint">移動の所要時間の目安などは、ここに手入力しておくと予定カードに表示されます</div>
+
+      <label className="field-label">緯度・経度(任意)</label>
+      <input className="field-input" placeholder="例:48.8584, 2.2945" value={coord} onChange={(e) => setCoord(e.target.value)} />
+      <div className="field-hint">地図タブに出したいときに使います。空欄でも「場所の位置を自動で調べる」で埋められます</div>
 
       <div className="form-actions">
         <button className="btn-mini full" disabled={!canSave} onClick={save}>保存する</button>
@@ -1148,22 +1176,32 @@ function WishlistTab({ trip, updateTrip }) {
   const [deletingId, setDeletingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editUrl, setEditUrl] = useState("");
+  const [coord, setCoord] = useState("");
+  const [editCoord, setEditCoord] = useState("");
 
   const list = trip.wishlist || [];
   const setList = (l) => updateTrip({ ...trip, wishlist: l });
 
+  // 「48.8584, 2.2945」のような文字列を緯度・経度に変換する
+  const parseCoord = (text) => {
+    const m = (text || "").split(",").map((x) => Number(x.trim()));
+    if (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) return { lat: m[0], lng: m[1] };
+    return {};
+  };
+
   const add = () => {
     if (!name.trim()) return;
-    setList([...list, { id: newId(), name: name.trim(), url: url.trim() }]);
-    setName(""); setUrl("");
+    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), ...parseCoord(coord) }]);
+    setName(""); setUrl(""); setCoord("");
   };
 
   const startEdit = (item) => {
     setEditingId(item.id); setEditName(item.name); setEditUrl(item.url || "");
+    setEditCoord(typeof item.lat === "number" ? `${item.lat}, ${item.lng}` : "");
   };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim() } : w)));
+    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), ...parseCoord(editCoord) } : w)));
     setEditingId(null);
   };
   const remove = (id) => { setList(list.filter((w) => w.id !== id)); setDeletingId(null); };
@@ -1182,6 +1220,9 @@ function WishlistTab({ trip, updateTrip }) {
         <label className="field-label">地図のURL(任意)</label>
         <input className="field-input" placeholder="地図のURLを貼り付け" value={url} onChange={(e) => setUrl(e.target.value)} />
         <div className="field-hint">URLを空欄にすると、場所の名前から自動で地図を検索して開きます</div>
+        <label className="field-label">緯度・経度(任意)</label>
+        <input className="field-input" placeholder="例:48.8584, 2.2945" value={coord} onChange={(e) => setCoord(e.target.value)} />
+        <div className="field-hint">地図タブに出したいときに使います。空欄でも「場所の位置を自動で調べる」で埋められます</div>
         <button className="btn-mini full" onClick={add}><Plus size={14} />行きたいところを追加</button>
       </div>
 
@@ -1194,6 +1235,8 @@ function WishlistTab({ trip, updateTrip }) {
               <input className="field-input" value={editName} onChange={(e) => setEditName(e.target.value)} />
               <label className="field-label">地図のURL(任意)</label>
               <input className="field-input" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
+              <label className="field-label">緯度・経度(任意)</label>
+              <input className="field-input" placeholder="例:48.8584, 2.2945" value={editCoord} onChange={(e) => setEditCoord(e.target.value)} />
               <div className="form-actions">
                 <button className="btn-mini full" onClick={saveEdit}>保存する</button>
                 <button className="btn-secondary full" onClick={() => setEditingId(null)}>やめる</button>
@@ -1286,6 +1329,124 @@ function ReservationTab({ trip, updateTrip }) {
   );
 }
 
+/* ============================== 地図タブ ============================== */
+function MapTab({ trip, updateTrip }) {
+  const mapRef = useRef(null);
+  const mapObj = useRef(null);
+  const [busy, setBusy] = useState(false);
+
+  // 日程の予定(座標つき)を時刻順に集める
+  const schedulePoints = [];
+  Object.entries(trip.days || {}).forEach(([date, items]) => {
+    items.forEach((it) => {
+      const place = it.location || it.arrivalLocation;
+      if (!place) return;
+      schedulePoints.push({
+        name: it.title, place, date,
+        sortTs: jstTs(date, it.time, it.timeZone, trip.timeDiffHours),
+        lat: it.lat, lng: it.lng, kind: "schedule",
+      });
+    });
+  });
+  schedulePoints.sort((a, b) => a.sortTs - b.sortTs);
+  schedulePoints.forEach((p, i) => { p.num = i + 1; });
+
+  const wishPoints = (trip.wishlist || []).map((w) => ({
+    name: w.name, place: w.name, lat: w.lat, lng: w.lng, kind: "wishlist",
+  }));
+
+  const all = [...schedulePoints, ...wishPoints];
+  const withCoords = all.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
+  const missing = all.filter((p) => typeof p.lat !== "number" || typeof p.lng !== "number");
+
+  // 地図を描画する
+  useEffect(() => {
+    if (!window.L || !mapRef.current) return;
+    if (!mapObj.current) {
+      mapObj.current = window.L.map(mapRef.current).setView([48.8566, 2.3522], 12);
+      window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap",
+        maxZoom: 19,
+      }).addTo(mapObj.current);
+    }
+    const map = mapObj.current;
+    // 既存のピンを消す
+    map.eachLayer((layer) => { if (layer instanceof window.L.Marker || layer instanceof window.L.Polyline) map.removeLayer(layer); });
+
+    withCoords.forEach((p) => {
+      const color = p.kind === "schedule" ? "#3FA9E0" : "#FFB6B9";
+      const label = p.kind === "schedule" ? String(p.num) : "♥";
+      const icon = window.L.divIcon({
+        className: "",
+        html: `<div style="background:${color};color:white;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.3)"><span style="transform:rotate(45deg)">${label}</span></div>`,
+        iconSize: [26, 26], iconAnchor: [13, 26],
+      });
+      window.L.marker([p.lat, p.lng], { icon }).addTo(map).bindPopup(`${p.name}<br>${p.place}`);
+    });
+
+    // 日程の予定を順番に線でつなぐ
+    const line = schedulePoints.filter((p) => typeof p.lat === "number").map((p) => [p.lat, p.lng]);
+    if (line.length > 1) window.L.polyline(line, { color: "#3FA9E0", weight: 2, opacity: 0.6 }).addTo(map);
+
+    if (withCoords.length > 0) {
+      map.fitBounds(withCoords.map((p) => [p.lat, p.lng]), { padding: [40, 40], maxZoom: 14 });
+    }
+    setTimeout(() => map.invalidateSize(), 100);
+  }, [JSON.stringify(withCoords.map((p) => [p.lat, p.lng, p.name]))]);
+
+  // 座標が無い場所を自動で調べる
+  const fillCoords = async () => {
+    setBusy(true);
+    const newDays = JSON.parse(JSON.stringify(trip.days || {}));
+    for (const [date, items] of Object.entries(newDays)) {
+      for (const it of items) {
+        const place = it.location || it.arrivalLocation;
+        if (!place || typeof it.lat === "number") continue;
+        const c = await lookupCoords(place);
+        if (c) { it.lat = c.lat; it.lng = c.lng; }
+      }
+    }
+    const newWish = [...(trip.wishlist || [])];
+    for (const w of newWish) {
+      if (typeof w.lat === "number") continue;
+      const c = await lookupCoords(w.name);
+      if (c) { w.lat = c.lat; w.lng = c.lng; }
+    }
+    updateTrip({ ...trip, days: newDays, wishlist: newWish });
+    setBusy(false);
+  };
+
+  return (
+    <div className="tab-content">
+      <div ref={mapRef} className="map-canvas" />
+
+      <div className="map-legend">
+        <span><i className="legend-dot" style={{ background: "#3FA9E0" }} />番号=日程の予定</span>
+        <span><i className="legend-dot" style={{ background: "#FFB6B9" }} />♥=行きたいところ</span>
+      </div>
+
+      <button className="btn-mini full" onClick={fillCoords} disabled={busy}>
+        {busy ? "調べています…" : "場所の位置を自動で調べる"}
+      </button>
+      <div className="field-hint">
+        場所の名前から位置を自動で調べます。うまく見つからない場所は、日程や行きたいところの入力欄で
+        緯度・経度を直接入力すると地図に出ます。
+      </div>
+
+      {missing.length > 0 && (
+        <div className="mini-form">
+          <div className="field-label" style={{ marginTop: 0 }}>まだ地図に出ていない場所</div>
+          {missing.map((p, i) => (
+            <div key={i} style={{ fontSize: 12, padding: "4px 0" }}>
+              {p.name} <span className="coord-missing">座標なし</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================== 旅行詳細ページ ============================== */
 const TABS = [
   { key: "schedule", label: "日程", icon: Calendar },
@@ -1294,6 +1455,7 @@ const TABS = [
   { key: "todo", label: "やること", icon: ListChecks },
   { key: "reservation", label: "予約", icon: Ticket },
   { key: "wishlist", label: "行きたいところ", icon: Heart },
+  { key: "map", label: "地図", icon: Map },
 ];
 
 function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onToggleArchive, showToast }) {
@@ -1354,6 +1516,7 @@ function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onTo
       {tab === "todo" && <TodoTab trip={trip} updateTrip={updateTrip} />}
       {tab === "reservation" && <ReservationTab trip={trip} updateTrip={updateTrip} />}
       {tab === "wishlist" && <WishlistTab trip={trip} updateTrip={updateTrip} />}
+      {tab === "map" && <MapTab trip={trip} updateTrip={updateTrip} />}
 
       <div style={{ textAlign: "center", marginTop: 12 }}>
         {confirmingDelete ? (
