@@ -355,32 +355,48 @@ const CITY_TIMEZONES = [
   { label: "フィジー", tz: "Pacific/Fiji" },
 ];
 
-// 地図リンクを開く(Googleマップ / Citymapper 切り替え対応)
-// Citymapperは目的地名で直接開ける形式を使う(座標検索に頼らないため確実に動く)
-function openLocationLink(place, provider) {
-  if (!place) return;
-  if (provider === "citymapper") {
-    window.open(
-      `https://citymapper.com/directions?endname=${encodeURIComponent(place)}&endaddress=${encodeURIComponent(place)}`,
-      "_blank"
-    );
-    return;
-  }
-  window.open(mapsUrl(place), "_blank");
-}
-
-// 場所名から緯度・経度を自動で調べる(無料・登録不要のOpenStreetMap Nominatim)
+// 場所名から緯度・経度を調べる(GoogleのGeocoding APIを使用)
 // 見つからなければ null を返す。その場合は手入力で補える。
 async function lookupCoords(place) {
   if (!place) return null;
+  if (!window.google || !window.google.maps) return null;
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(place)}`
-    );
-    const data = await res.json();
-    if (data && data[0]) return { lat: Number(data[0].lat), lng: Number(data[0].lon) };
+    const geocoder = new window.google.maps.Geocoder();
+    const result = await geocoder.geocode({ address: place });
+    if (result && result.results && result.results[0]) {
+      const loc = result.results[0].geometry.location;
+      return { lat: loc.lat(), lng: loc.lng() };
+    }
   } catch (e) { /* 失敗時はnull */ }
   return null;
+}
+
+// 地図リンクを開く(Googleマップ / Citymapper 切り替え対応)
+// Citymapperは目的地の座標が必要なため、登録済みの座標を使い、
+// 無ければその場で調べてから開く(ポップアップ対策として先に空タブを開いておく)。
+function openLocationLink(place, provider, coords) {
+  if (!place) return;
+
+  if (provider === "citymapper") {
+    const buildUrl = (c) =>
+      `https://citymapper.com/directions?endcoord=${c.lat}%2C${c.lng}&endname=${encodeURIComponent(place)}`;
+
+    // すでに座標が分かっていれば、そのまま開く
+    if (coords && typeof coords.lat === "number" && typeof coords.lng === "number") {
+      window.open(buildUrl(coords), "_blank");
+      return;
+    }
+
+    // 分からなければ、先に空タブを開いてから調べる
+    const tab = window.open("", "_blank");
+    (async () => {
+      const c = await lookupCoords(place);
+      if (tab) tab.location.href = c ? buildUrl(c) : mapsUrl(place);
+    })();
+    return;
+  }
+
+  window.open(mapsUrl(place), "_blank");
 }
 
 /* ============================== サンプルデータ ============================== */
@@ -916,7 +932,7 @@ function ScheduleCard({ item, trip, onEdit, onDelete }) {
         </div>
         <div className="schedule-meta">
           {item.location && (
-            <a className="meta-link" href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openLocationLink(item.location, trip.mapProvider); }}>
+            <a className="meta-link" href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openLocationLink(item.location, trip.mapProvider, item); }}>
               <MapPin size={11} />{item.location}<ExternalLink size={9} />
             </a>
           )}
@@ -1043,7 +1059,7 @@ function ScheduleTab({ trip, updateTrip }) {
                 </div>
                 {item.location && (
                   <div className="schedule-meta">
-                    <a className="meta-link" href="#" onClick={(e) => { e.preventDefault(); openLocationLink(item.location, trip.mapProvider); }}><MapPin size={11} />{item.location}<ExternalLink size={9} /></a>
+                    <a className="meta-link" href="#" onClick={(e) => { e.preventDefault(); openLocationLink(item.location, trip.mapProvider, item); }}><MapPin size={11} />{item.location}<ExternalLink size={9} /></a>
                   </div>
                 )}
               </div>
@@ -1224,7 +1240,7 @@ function WishlistTab({ trip, updateTrip }) {
   // URLが入っていればそれを開く。無ければ場所名で地図を検索する。
   const openPlace = (item) => {
     if (item.url) { window.open(item.url, "_blank"); return; }
-    openLocationLink(item.name, trip.mapProvider);
+    openLocationLink(item.name, trip.mapProvider, item);
   };
 
   return (
@@ -1794,7 +1810,7 @@ function Home({ trips, onOpenDrawer, onSelectTrip, onCreateNew }) {
           return (
             <a
               key={i} className="mini-item clickable" href="#"
-              onClick={(e) => { e.preventDefault(); if (place) openLocationLink(place, active.mapProvider); }}
+              onClick={(e) => { e.preventDefault(); if (place) openLocationLink(place, active.mapProvider, item); }}
               style={{ textDecoration: "none", color: "inherit" }}
             >
               {item.kind === "schedule" ? (
