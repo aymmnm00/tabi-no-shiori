@@ -196,9 +196,9 @@ const RESV_CATEGORIES = ["フライト", "ホテル", "レンタカー", "その
 const WISH_ICONS = [
   { icon: "☕", label: "カフェ" },
   { icon: "🍽", label: "レストラン" },
-  { icon: "🥐", label: "パン" },
-  { icon: "🍫", label: "チョコ" },
-  { icon: "🍔", label: "ハンバーガー" },
+  { icon: "🥐", label: "ベーカリー" },
+  { icon: "🍫", label: "チョコレート" },
+  { icon: "🍔", label: "軽食" },
   { icon: "🍰", label: "スイーツ" },
   { icon: "🍷", label: "バー" },
   { icon: "🛍", label: "買い物" },
@@ -1336,7 +1336,9 @@ function WishlistTab({ trip, updateTrip }) {
           ) : (
             <div className="reservation-item" key={item.id}>
               <div className="reservation-body clickable" style={{ cursor: "pointer" }} onClick={() => startEdit(item)}>
-                <div className="reservation-name">{item.name}</div>
+                <div className="reservation-name">
+                  <span className="wish-item-icon">{item.icon || "🌐"}</span> {item.name}
+                </div>
                 <div className="reservation-meta">
                   <a
                     href="#"
