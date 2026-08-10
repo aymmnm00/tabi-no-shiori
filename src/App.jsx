@@ -1348,6 +1348,8 @@ function ReservationTab({ trip, updateTrip }) {
 function MapTab({ trip, updateTrip }) {
   const mapRef = useRef(null);
   const mapObj = useRef(null);
+  const markersRef = useRef([]);
+  const lineRef = useRef(null);
   const [busy, setBusy] = useState(false);
 
   // 日程の予定(座標つき)を時刻順に集める
@@ -1374,39 +1376,70 @@ function MapTab({ trip, updateTrip }) {
   const withCoords = all.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
   const missing = all.filter((p) => typeof p.lat !== "number" || typeof p.lng !== "number");
 
-  // 地図を描画する
+  // 地図を描画する(Googleマップ)
   useEffect(() => {
-    if (!window.L || !mapRef.current) return;
+    if (!window.google || !window.google.maps || !mapRef.current) return;
     if (!mapObj.current) {
-      mapObj.current = window.L.map(mapRef.current).setView([48.8566, 2.3522], 12);
-      window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap",
-        maxZoom: 19,
-      }).addTo(mapObj.current);
+      mapObj.current = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 48.8566, lng: 2.3522 },
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+      });
+      markersRef.current = [];
+      lineRef.current = null;
     }
     const map = mapObj.current;
-    // 既存のピンを消す
-    map.eachLayer((layer) => { if (layer instanceof window.L.Marker || layer instanceof window.L.Polyline) map.removeLayer(layer); });
+
+    // 既存のピンと線を消す
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+    if (lineRef.current) { lineRef.current.setMap(null); lineRef.current = null; }
+
+    const info = new window.google.maps.InfoWindow();
 
     withCoords.forEach((p) => {
-      const color = p.kind === "schedule" ? "#3FA9E0" : "#FFB6B9";
-      const label = p.kind === "schedule" ? String(p.num) : "♥";
-      const icon = window.L.divIcon({
-        className: "",
-        html: `<div style="background:${color};color:white;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.3)"><span style="transform:rotate(45deg)">${label}</span></div>`,
-        iconSize: [26, 26], iconAnchor: [13, 26],
+      const isSchedule = p.kind === "schedule";
+      const marker = new window.google.maps.Marker({
+        position: { lat: p.lat, lng: p.lng },
+        map,
+        label: {
+          text: isSchedule ? String(p.num) : "♥",
+          color: "#ffffff",
+          fontSize: "12px",
+          fontWeight: "700",
+        },
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 13,
+          fillColor: isSchedule ? "#3FA9E0" : "#FFB6B9",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
       });
-      window.L.marker([p.lat, p.lng], { icon }).addTo(map).bindPopup(`${p.name}<br>${p.place}`);
+      marker.addListener("click", () => {
+        info.setContent(`<div style="font-size:13px;font-weight:700">${p.name}</div><div style="font-size:12px;opacity:0.7">${p.place}</div>`);
+        info.open(map, marker);
+      });
+      markersRef.current.push(marker);
     });
 
     // 日程の予定を順番に線でつなぐ
-    const line = schedulePoints.filter((p) => typeof p.lat === "number").map((p) => [p.lat, p.lng]);
-    if (line.length > 1) window.L.polyline(line, { color: "#3FA9E0", weight: 2, opacity: 0.6 }).addTo(map);
+    const path = schedulePoints
+      .filter((p) => typeof p.lat === "number")
+      .map((p) => ({ lat: p.lat, lng: p.lng }));
+    if (path.length > 1) {
+      lineRef.current = new window.google.maps.Polyline({
+        path, map, strokeColor: "#3FA9E0", strokeWeight: 2, strokeOpacity: 0.6,
+      });
+    }
 
     if (withCoords.length > 0) {
-      map.fitBounds(withCoords.map((p) => [p.lat, p.lng]), { padding: [40, 40], maxZoom: 14 });
+      const bounds = new window.google.maps.LatLngBounds();
+      withCoords.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+      map.fitBounds(bounds, 50);
     }
-    setTimeout(() => map.invalidateSize(), 100);
   }, [JSON.stringify(withCoords.map((p) => [p.lat, p.lng, p.name]))]);
 
   // 座標が無い場所を自動で調べる
