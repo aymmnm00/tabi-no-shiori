@@ -209,6 +209,7 @@ const WISH_ICONS = [
   { icon: "🌳", label: "公園" },
   { icon: "📷", label: "撮影スポット" },
   { icon: "🌐", label: "その他" },
+  { icon: "✈️", label: "空港" },
 ];
 const TODO_PHASES = [
   { key: "pre", label: "旅行前" },
