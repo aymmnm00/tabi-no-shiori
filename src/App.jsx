@@ -4,7 +4,7 @@ import { db } from "./firebaseClient";
 import {
   Plus, X, MapPin, Calendar, Package, ShoppingCart, ListChecks, Ticket,
   ArrowLeft, Archive, ExternalLink, Check, Menu, Trash2, Pencil, Download,
-  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart, Map,
+  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart, Map, Lock,
 } from "lucide-react";
 
 /* ============================== スタイル ============================== */
@@ -194,6 +194,12 @@ const TODO_PHASES = [
   { key: "post", label: "旅行後" },
 ];
 const catInfo = (key) => CATEGORIES.find((c) => c.key === key) || CATEGORIES[4];
+
+/* ---- 合言葉(簡易ロック) ----
+   注意:これは「うっかり見えてしまう」のを防ぐ簡易的な仕組みです。
+   合言葉は端末内に覚えられ、一度開いた旅行は同じ端末では再入力不要になります。 */
+const unlockedIds = new Set();
+const isLocked = (t) => !!(t.passcode && !unlockedIds.has(t.id));
 
 /* ============================== 国旗データ ============================== */
 const flagEmoji = (code) =>
@@ -607,6 +613,7 @@ function TripFormPanel({ initial, onSave, onClose }) {
   const [memberInput, setMemberInput] = useState("");
   const [memberPhoto, setMemberPhoto] = useState(null);
   const [mapProvider, setMapProvider] = useState(initial?.mapProvider || "google");
+  const [passcode, setPasscode] = useState(initial?.passcode || "");
 
   const canSave = name.trim() && destination.trim() && startDate && endDate && endDate >= startDate;
 
@@ -635,6 +642,7 @@ function TripFormPanel({ initial, onSave, onClose }) {
       isInternational,
       timeDiffHours: isInternational ? (timeDiffHours === "" ? 0 : Number(timeDiffHours)) : 0,
       mapProvider,
+      passcode: passcode.trim(),
       archived: initial?.archived || false,
       days: initial?.days || {},
       packingList: initial?.packingList || [],
@@ -764,6 +772,13 @@ function TripFormPanel({ initial, onSave, onClose }) {
             <button className={`tz-btn${mapProvider === "citymapper" ? " active" : ""}`} onClick={() => setMapProvider("citymapper")} type="button">Citymapper</button>
           </div>
           <div className="field-hint">場所をタップしたときに開く地図アプリです。Citymapperは公共交通機関が充実した都市向けです(パリなど)。</div>
+
+          <label className="field-label">合言葉(任意)</label>
+          <input className="field-input" placeholder="例:hawaii2026" value={passcode} onChange={(e) => setPasscode(e.target.value)} />
+          <div className="field-hint">
+            合言葉を設定すると、旅行一覧では「🔒 ロック中の旅行」とだけ表示され、合言葉を知っている人だけが開けます。
+            空欄なら誰でも開けます。(簡易的な仕組みのため、大切な情報の保護には向きません)
+          </div>
         </div>
         <div className="panel-footer">
           <button className="btn-primary full" disabled={!canSave} onClick={handleSave}>
@@ -1598,20 +1613,31 @@ function Drawer({ open, trips, onClose, onSelectTrip, onCreateNew, onToggleArchi
   const past = trips.filter((t) => !t.archived && t.endDate < today).sort((a, b) => b.endDate.localeCompare(a.endDate));
   const archived = trips.filter((t) => t.archived);
 
-  const renderCard = (t) => (
-    <div className="trip-card" key={t.id} onClick={() => onSelectTrip(t.id)}>
-      <span className="trip-card-emoji">{t.emoji}</span>
-      <div className="trip-card-body">
-        <div className="trip-card-name">{t.name}</div>
-        <div className="trip-card-dest"><MapPin size={10} />{t.destination}</div>
-        <div className="trip-card-dates">{fmtDateRange(t.startDate, t.endDate)}</div>
+  const renderCard = (t) => {
+    const locked = isLocked(t);
+    return (
+      <div className="trip-card" key={t.id} onClick={() => onSelectTrip(t.id)}>
+        <span className="trip-card-emoji">{locked ? "🔒" : t.emoji}</span>
+        <div className="trip-card-body">
+          {locked ? (
+            <div className="trip-card-name">ロック中の旅行</div>
+          ) : (
+            <>
+              <div className="trip-card-name">{t.name}</div>
+              <div className="trip-card-dest"><MapPin size={10} />{t.destination}</div>
+              <div className="trip-card-dates">{fmtDateRange(t.startDate, t.endDate)}</div>
+            </>
+          )}
+        </div>
+        {!locked && (
+          <button className="icon-btn faint" onClick={(e) => { e.stopPropagation(); onToggleArchive(t.id); }}>
+            {t.archived ? <RotateCcw size={16} /> : <Archive size={16} />}
+          </button>
+        )}
+        <ChevronRight size={18} className="chevron" />
       </div>
-      <button className="icon-btn faint" onClick={(e) => { e.stopPropagation(); onToggleArchive(t.id); }}>
-        {t.archived ? <RotateCcw size={16} /> : <Archive size={16} />}
-      </button>
-      <ChevronRight size={18} className="chevron" />
-    </div>
-  );
+    );
+  };
 
   return (
     <>
@@ -1786,6 +1812,48 @@ function Home({ trips, onOpenDrawer, onSelectTrip, onCreateNew }) {
   );
 }
 
+/* ============================== 合言葉の入力 ============================== */
+function PasscodePanel({ trip, onUnlock, onClose }) {
+  const [input, setInput] = useState("");
+  const [wrong, setWrong] = useState(false);
+
+  const submit = () => {
+    if (input === trip.passcode) {
+      unlockedIds.add(trip.id);
+      onUnlock();
+    } else {
+      setWrong(true);
+    }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="panel" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <h3>🔒 合言葉を入力</h3>
+          <button className="icon-btn" onClick={onClose}><X size={20} /></button>
+        </div>
+        <div className="panel-body">
+          <div className="field-hint" style={{ fontSize: 12.5, opacity: 0.75 }}>
+            この旅行は合言葉で保護されています。
+          </div>
+          <input
+            className="field-input" type="password" placeholder="合言葉を入力"
+            value={input}
+            onChange={(e) => { setInput(e.target.value); setWrong(false); }}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            autoFocus
+          />
+          {wrong && <div className="field-hint" style={{ color: "#C25B3E", fontWeight: 700 }}>合言葉が違います</div>}
+        </div>
+        <div className="panel-footer">
+          <button className="btn-primary full" disabled={!input} onClick={submit}>開く</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================== ルート ============================== */
 const TRIPS_DOC = doc(db, "appData", "trips");
 
@@ -1797,6 +1865,7 @@ export default function App() {
   const [showCreatePanel, setShowCreatePanel] = useState(false);
   const [toast, setToast] = useState("");
   const [saveError, setSaveError] = useState(false);
+  const [lockedTrip, setLockedTrip] = useState(null);   // 合言葉の入力待ちの旅行
 
   const showToast = (msg) => {
     setToast(msg);
@@ -1839,7 +1908,11 @@ export default function App() {
   const updateTrip = (updated) => persist(trips.map((t) => (t.id === updated.id ? updated : t)));
   const selectedTrip = trips.find((t) => t.id === selectedTripId);
 
-  const handleSelectTrip = (id) => { setSelectedTripId(id); setView("detail"); setDrawerOpen(false); };
+  const handleSelectTrip = (id) => {
+    const t = trips.find((x) => x.id === id);
+    if (t && isLocked(t)) { setLockedTrip(t); setDrawerOpen(false); return; }
+    setSelectedTripId(id); setView("detail"); setDrawerOpen(false);
+  };
   const handleToggleArchive = (id) => persist(trips.map((t) => (t.id === id ? { ...t, archived: !t.archived } : t)));
   const handleDeleteTrip = (id) => { persist(trips.filter((t) => t.id !== id)); setView("home"); setSelectedTripId(null); };
   const handleCreateTrip = (t) => { persist([...trips, t]); setShowCreatePanel(false); handleSelectTrip(t.id); };
@@ -1851,7 +1924,7 @@ export default function App() {
       {toast && <div className="save-error">{toast}</div>}
 
       {view === "home" && (
-        <Home trips={trips} onOpenDrawer={() => setDrawerOpen(true)} onSelectTrip={handleSelectTrip} onCreateNew={() => setShowCreatePanel(true)} />
+        <Home trips={trips.filter((t) => !isLocked(t))} onOpenDrawer={() => setDrawerOpen(true)} onSelectTrip={handleSelectTrip} onCreateNew={() => setShowCreatePanel(true)} />
       )}
       {view === "detail" && selectedTrip && (
         <TripDetail
@@ -1876,6 +1949,18 @@ export default function App() {
 
       {showCreatePanel && (
         <TripFormPanel onClose={() => setShowCreatePanel(false)} onSave={handleCreateTrip} />
+      )}
+
+      {lockedTrip && (
+        <PasscodePanel
+          trip={lockedTrip}
+          onClose={() => setLockedTrip(null)}
+          onUnlock={() => {
+            setSelectedTripId(lockedTrip.id);
+            setView("detail");
+            setLockedTrip(null);
+          }}
+        />
       )}
     </div>
   );
