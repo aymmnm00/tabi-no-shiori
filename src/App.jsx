@@ -184,6 +184,9 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-filter-label { font-size:10.5px; font-weight:700; opacity:0.55; width:100%; }
 .wish-chip { background:#F1F5F8; color:var(--navy); border:none; border-radius:999px; padding:5px 11px; font-size:12px; font-weight:700; cursor:pointer; }
 .wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
+.wish-photo { width:100%; max-height:170px; object-fit:cover; border-radius:12px; margin-top:8px; display:block; }
+.wish-memo { font-size:11.5px; opacity:0.75; margin-top:4px; line-height:1.5; white-space:pre-wrap; }
+.wish-photo-preview { width:100%; max-height:150px; object-fit:cover; border-radius:12px; margin-top:6px; display:block; }
 .wish-country { font-size:10.5px; font-weight:700; color:var(--sky-deep); opacity:0.8; margin-top:2px; }
 .coord-missing { font-size:11px; color:#C25B3E; background:#FFE3DC; border-radius:999px; padding:2px 9px; font-weight:700; }
 `;
@@ -294,6 +297,30 @@ function dedupeIds(arr) {
     return { ...item, id: newId() };
   });
   return changed ? fixed : arr;
+}
+
+// 選んだ画像を小さく圧縮して文字データに変換する
+// (Firestoreの保存上限を超えないよう、横幅400px・JPEG品質70%まで縮める)
+function readImageCompressed(file, maxWidth = 400) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("読み込み失敗"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("画像を開けません"));
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // 1つの旅行の中にある全リストのID重複を直す
@@ -1287,6 +1314,10 @@ function WishlistTab({ trip, updateTrip }) {
   const [editIcon, setEditIcon] = useState("🌐");
   const [country, setCountry] = useState("");
   const [editCountry, setEditCountry] = useState("");
+  const [memo, setMemo] = useState("");
+  const [editMemo, setEditMemo] = useState("");
+  const [photo, setPhoto] = useState(null);
+  const [editPhoto, setEditPhoto] = useState(null);
   const [filterCountry, setFilterCountry] = useState(null);   // 絞り込み中の国
   const [filterIcon, setFilterIcon] = useState(null);         // 絞り込み中の種類
 
@@ -1313,8 +1344,8 @@ function WishlistTab({ trip, updateTrip }) {
 
   const add = () => {
     if (!name.trim()) return;
-    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), icon, country: country.trim(), ...parseCoord(coord) }]);
-    setName(""); setUrl(""); setCoord(""); setIcon("🌐");
+    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), icon, country: country.trim(), memo: memo.trim(), photo, ...parseCoord(coord) }]);
+    setName(""); setUrl(""); setCoord(""); setIcon("🌐"); setCountry(""); setMemo(""); setPhoto(null);
   };
 
   const startEdit = (item) => {
@@ -1322,13 +1353,21 @@ function WishlistTab({ trip, updateTrip }) {
     setEditCoord(typeof item.lat === "number" ? `${item.lat}, ${item.lng}` : "");
     setEditIcon(item.icon || "🌐");
     setEditCountry(item.country || "");
+    setEditMemo(item.memo || "");
+    setEditPhoto(item.photo || null);
   };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), icon: editIcon, country: editCountry.trim(), ...parseCoord(editCoord) } : w)));
+    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), icon: editIcon, country: editCountry.trim(), memo: editMemo.trim(), photo: editPhoto, ...parseCoord(editCoord) } : w)));
     setEditingId(null);
   };
   const remove = (id) => { setList(list.filter((w) => w.id !== id)); setDeletingId(null); };
+
+  const pickPhoto = async (e, setter) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try { setter(await readImageCompressed(file)); } catch (err) { /* 読み込み失敗時は何もしない */ }
+  };
 
   // URLが入っていればそれを開く。無ければ場所名で地図を検索する。
   const openPlace = (item) => {
@@ -1364,6 +1403,19 @@ function WishlistTab({ trip, updateTrip }) {
         <label className="field-label">緯度・経度(任意)</label>
         <input className="field-input" placeholder="例:48.8584, 2.2945" value={coord} onChange={(e) => setCoord(e.target.value)} />
         <div className="field-hint">地図タブに出したいときに使います。空欄でも「場所の位置を自動で調べる」で埋められます</div>
+
+        <label className="field-label">メモ(任意)</label>
+        <textarea className="field-input" rows={2} placeholder="例:予約が必要、日曜休み" value={memo} onChange={(e) => setMemo(e.target.value)} />
+
+        <label className="field-label">写真(任意)</label>
+        <input type="file" accept="image/*" className="field-input" onChange={(e) => pickPhoto(e, setPhoto)} />
+        {photo && (
+          <>
+            <img src={photo} alt="" className="wish-photo-preview" />
+            <button className="link-btn danger" style={{ alignSelf: "flex-start" }} onClick={() => setPhoto(null)}>写真を削除</button>
+          </>
+        )}
+
         <button className="btn-mini full" onClick={add}><Plus size={14} />行きたいところを追加</button>
       </div>
 
@@ -1427,6 +1479,19 @@ function WishlistTab({ trip, updateTrip }) {
               <input className="field-input" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
               <label className="field-label">緯度・経度(任意)</label>
               <input className="field-input" placeholder="例:48.8584, 2.2945" value={editCoord} onChange={(e) => setEditCoord(e.target.value)} />
+
+              <label className="field-label">メモ(任意)</label>
+              <textarea className="field-input" rows={2} placeholder="例:予約が必要、日曜休み" value={editMemo} onChange={(e) => setEditMemo(e.target.value)} />
+
+              <label className="field-label">写真(任意)</label>
+              <input type="file" accept="image/*" className="field-input" onChange={(e) => pickPhoto(e, setEditPhoto)} />
+              {editPhoto && (
+                <>
+                  <img src={editPhoto} alt="" className="wish-photo-preview" />
+                  <button className="link-btn danger" style={{ alignSelf: "flex-start" }} onClick={() => setEditPhoto(null)}>写真を削除</button>
+                </>
+              )}
+
               <div className="form-actions">
                 <button className="btn-mini full" onClick={saveEdit}>保存する</button>
                 <button className="btn-secondary full" onClick={() => setEditingId(null)}>やめる</button>
@@ -1451,6 +1516,8 @@ function WishlistTab({ trip, updateTrip }) {
                     <MapPin size={11} />地図で開く<ExternalLink size={9} />
                   </a>
                 </div>
+                {item.memo && <div className="wish-memo">{item.memo}</div>}
+                {item.photo && <img src={item.photo} alt="" className="wish-photo" />}
               </div>
               <button className="icon-btn faint" onClick={() => setDeletingId(item.id)}><X size={16} /></button>
             </div>
