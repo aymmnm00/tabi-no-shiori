@@ -275,8 +275,45 @@ const FLAG_COUNTRY_CODES = [
 const ICON_CHOICES = [...EMOJIS, ...EXTRA_EMOJIS, ...FLAG_COUNTRY_CODES.map(flagEmoji)];
 
 /* ============================== 日付ヘルパー ============================== */
-let idSeq = 1000;
-const newId = () => `id${idSeq++}`;
+// IDは「時刻 + ランダム値 + 連番」で作る。
+// 以前は連番だけだったため、ページを開き直すと番号が最初に戻り、
+// 既存の項目と同じIDになって一覧が二重に出る不具合があった。
+let idSeq = 0;
+const newId = () =>
+  `id${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}${idSeq++}`;
+
+// 配列の中でIDが重複していたら、新しいIDを振り直して返す
+function dedupeIds(arr) {
+  if (!Array.isArray(arr)) return arr;
+  const seen = new Set();
+  let changed = false;
+  const fixed = arr.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    if (item.id && !seen.has(item.id)) { seen.add(item.id); return item; }
+    changed = true;
+    return { ...item, id: newId() };
+  });
+  return changed ? fixed : arr;
+}
+
+// 1つの旅行の中にある全リストのID重複を直す
+function repairTrip(trip) {
+  const fixed = { ...trip };
+  fixed.packingList = dedupeIds(trip.packingList || []);
+  fixed.shoppingList = dedupeIds(trip.shoppingList || []);
+  fixed.reservations = dedupeIds(trip.reservations || []);
+  fixed.wishlist = dedupeIds(trip.wishlist || []);
+  fixed.members = dedupeIds(trip.members || []);
+  fixed.todos = {
+    pre: dedupeIds(trip.todos?.pre || []),
+    during: dedupeIds(trip.todos?.during || []),
+    post: dedupeIds(trip.todos?.post || []),
+  };
+  const days = {};
+  Object.entries(trip.days || {}).forEach(([d, items]) => { days[d] = dedupeIds(items); });
+  fixed.days = days;
+  return fixed;
+}
 const pad2 = (n) => String(n).padStart(2, "0");
 const addDaysStr = (dateStr, n) => {
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -2052,7 +2089,9 @@ export default function App() {
       TRIPS_DOC,
       (snap) => {
         const value = snap.exists() ? snap.data().value : [];
-        setTrips(Array.isArray(value) ? value : []);
+        const arr = Array.isArray(value) ? value : [];
+        // 読み込むたびにID重複を直す(過去に作られた重複データの修復)
+        setTrips(dedupeIds(arr).map(repairTrip));
       },
       () => setTrips([])
     );
