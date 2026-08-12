@@ -179,6 +179,12 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-icon-choice { font-size:16px; background:white; border:2px solid transparent; border-radius:10px; width:38px; height:38px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 .wish-icon-choice.selected { border-color:var(--sky-deep); background:#E8F6FD; }
 .wish-item-icon { font-size:19px; flex-shrink:0; }
+.wish-filter { display:flex; flex-direction:column; gap:6px; background:white; border-radius:16px; padding:11px 13px; box-shadow:0 3px 10px rgba(63,169,224,0.07); }
+.wish-filter-row { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+.wish-filter-label { font-size:10.5px; font-weight:700; opacity:0.55; width:100%; }
+.wish-chip { background:#F1F5F8; color:var(--navy); border:none; border-radius:999px; padding:5px 11px; font-size:12px; font-weight:700; cursor:pointer; }
+.wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
+.wish-country { font-size:10.5px; font-weight:700; color:var(--sky-deep); opacity:0.8; margin-top:2px; }
 .coord-missing { font-size:11px; color:#C25B3E; background:#FFE3DC; border-radius:999px; padding:2px 9px; font-weight:700; }
 `;
 
@@ -197,7 +203,6 @@ const WISH_ICONS = [
   { icon: "☕", label: "カフェ" },
   { icon: "🍽", label: "レストラン" },
   { icon: "🥐", label: "ベーカリー" },
-  { icon: "🍦", label: "アイス" },
   { icon: "🍫", label: "チョコレート" },
   { icon: "🍔", label: "軽食" },
   { icon: "🍰", label: "スイーツ" },
@@ -210,7 +215,6 @@ const WISH_ICONS = [
   { icon: "🌳", label: "公園" },
   { icon: "📷", label: "撮影スポット" },
   { icon: "🌐", label: "その他" },
-  { icon: "✈️", label: "空港" },
 ];
 const TODO_PHASES = [
   { key: "pre", label: "旅行前" },
@@ -1244,9 +1248,24 @@ function WishlistTab({ trip, updateTrip }) {
   const [editCoord, setEditCoord] = useState("");
   const [icon, setIcon] = useState("🌐");
   const [editIcon, setEditIcon] = useState("🌐");
+  const [country, setCountry] = useState("");
+  const [editCountry, setEditCountry] = useState("");
+  const [filterCountry, setFilterCountry] = useState(null);   // 絞り込み中の国
+  const [filterIcon, setFilterIcon] = useState(null);         // 絞り込み中の種類
 
   const list = trip.wishlist || [];
   const setList = (l) => updateTrip({ ...trip, wishlist: l });
+
+  // 登録済みの国を候補として集める
+  const countries = [...new Set(list.map((w) => w.country).filter(Boolean))];
+  // 実際に使われている種類だけを絞り込みボタンに出す
+  const usedIcons = [...new Set(list.map((w) => w.icon || "🌐"))];
+
+  // 絞り込み後の一覧(国と種類は組み合わせ可)
+  const shown = list.filter((w) =>
+    (!filterCountry || w.country === filterCountry) &&
+    (!filterIcon || (w.icon || "🌐") === filterIcon)
+  );
 
   // 「48.8584, 2.2945」のような文字列を緯度・経度に変換する
   const parseCoord = (text) => {
@@ -1257,7 +1276,7 @@ function WishlistTab({ trip, updateTrip }) {
 
   const add = () => {
     if (!name.trim()) return;
-    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), icon, ...parseCoord(coord) }]);
+    setList([...list, { id: newId(), name: name.trim(), url: url.trim(), icon, country: country.trim(), ...parseCoord(coord) }]);
     setName(""); setUrl(""); setCoord(""); setIcon("🌐");
   };
 
@@ -1265,10 +1284,11 @@ function WishlistTab({ trip, updateTrip }) {
     setEditingId(item.id); setEditName(item.name); setEditUrl(item.url || "");
     setEditCoord(typeof item.lat === "number" ? `${item.lat}, ${item.lng}` : "");
     setEditIcon(item.icon || "🌐");
+    setEditCountry(item.country || "");
   };
   const saveEdit = () => {
     if (!editName.trim()) return;
-    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), icon: editIcon, ...parseCoord(editCoord) } : w)));
+    setList(list.map((w) => (w.id === editingId ? { ...w, name: editName.trim(), url: editUrl.trim(), icon: editIcon, country: editCountry.trim(), ...parseCoord(editCoord) } : w)));
     setEditingId(null);
   };
   const remove = (id) => { setList(list.filter((w) => w.id !== id)); setDeletingId(null); };
@@ -1295,6 +1315,12 @@ function WishlistTab({ trip, updateTrip }) {
 
         <label className="field-label">場所の名前</label>
         <input className="field-input" placeholder="名前(例:サント・シャペル)" value={name} onChange={(e) => setName(e.target.value)} />
+        <label className="field-label">国・エリア(任意)</label>
+        <input className="field-input" placeholder="例:フランス" value={country} onChange={(e) => setCountry(e.target.value)} list="wish-country-list" />
+        <datalist id="wish-country-list">
+          {countries.map((c) => <option key={c} value={c} />)}
+        </datalist>
+
         <label className="field-label">地図のURL(任意)</label>
         <input className="field-input" placeholder="地図のURLを貼り付け" value={url} onChange={(e) => setUrl(e.target.value)} />
         <div className="field-hint">URLを空欄にすると、場所の名前から自動で地図を検索して開きます</div>
@@ -1304,9 +1330,44 @@ function WishlistTab({ trip, updateTrip }) {
         <button className="btn-mini full" onClick={add}><Plus size={14} />行きたいところを追加</button>
       </div>
 
+      {(countries.length > 0 || usedIcons.length > 1) && (
+        <div className="wish-filter">
+          {countries.length > 0 && (
+            <div className="wish-filter-row">
+              <span className="wish-filter-label">国・エリアで絞り込む</span>
+              {countries.map((c) => (
+                <button
+                  key={c}
+                  className={`wish-chip${filterCountry === c ? " on" : ""}`}
+                  onClick={() => setFilterCountry(filterCountry === c ? null : c)}
+                >{c}</button>
+              ))}
+            </div>
+          )}
+          {usedIcons.length > 1 && (
+            <div className="wish-filter-row">
+              <span className="wish-filter-label">種類で絞り込む</span>
+              {usedIcons.map((ic) => (
+                <button
+                  key={ic}
+                  className={`wish-chip${filterIcon === ic ? " on" : ""}`}
+                  onClick={() => setFilterIcon(filterIcon === ic ? null : ic)}
+                >{ic}</button>
+              ))}
+            </div>
+          )}
+          {(filterCountry || filterIcon) && (
+            <button className="link-btn" style={{ alignSelf: "flex-start" }} onClick={() => { setFilterCountry(null); setFilterIcon(null); }}>
+              絞り込みを解除({shown.length}件)
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="card-list">
         {list.length === 0 && <div className="empty-state"><Heart size={26} />行きたいところはまだありません</div>}
-        {list.map((item) =>
+        {list.length > 0 && shown.length === 0 && <div className="empty-state">条件に合う場所はありません</div>}
+        {shown.map((item) =>
           editingId === item.id ? (
             <div className="mini-form" key={item.id}>
               <label className="field-label">種類</label>
@@ -1322,6 +1383,9 @@ function WishlistTab({ trip, updateTrip }) {
 
               <label className="field-label">場所の名前</label>
               <input className="field-input" value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <label className="field-label">国・エリア(任意)</label>
+              <input className="field-input" placeholder="例:フランス" value={editCountry} onChange={(e) => setEditCountry(e.target.value)} list="wish-country-list" />
+
               <label className="field-label">地図のURL(任意)</label>
               <input className="field-input" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
               <label className="field-label">緯度・経度(任意)</label>
@@ -1341,6 +1405,7 @@ function WishlistTab({ trip, updateTrip }) {
                 <div className="reservation-name">
                   <span className="wish-item-icon">{item.icon || "🌐"}</span> {item.name}
                 </div>
+                {item.country && <div className="wish-country">{item.country}</div>}
                 <div className="reservation-meta">
                   <a
                     href="#"
