@@ -206,6 +206,7 @@ const WISH_ICONS = [
   { icon: "☕", label: "カフェ" },
   { icon: "🍽", label: "レストラン" },
   { icon: "🥐", label: "ベーカリー" },
+  { icon: "🍦", label: "アイス" },
   { icon: "🍫", label: "チョコレート" },
   { icon: "🍔", label: "軽食" },
   { icon: "🍰", label: "スイーツ" },
