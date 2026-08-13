@@ -324,6 +324,56 @@ function readImageCompressed(file, maxWidth = 400) {
   });
 }
 
+// すでに保存されている大きすぎる画像を縮め直す
+// (以前のバージョンで圧縮せずに保存された写真が容量を圧迫するため)
+function shrinkDataUrl(dataUrl, maxWidth) {
+  return new Promise((resolve) => {
+    if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image")) { resolve(dataUrl); return; }
+    const img = new Image();
+    img.onerror = () => resolve(dataUrl);
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.7));
+    };
+    img.src = dataUrl;
+  });
+}
+
+// 旅行データ全体の画像を、必要なら縮める(30KBを超えるものだけ処理)
+async function shrinkTripImages(trips) {
+  const LIMIT = 30000;
+  let changed = false;
+  const out = [];
+  for (const trip of trips) {
+    const t = { ...trip };
+    if (Array.isArray(t.members)) {
+      t.members = [];
+      for (const m of trip.members) {
+        if (m?.photo && m.photo.length > LIMIT) {
+          t.members.push({ ...m, photo: await shrinkDataUrl(m.photo, 160) });
+          changed = true;
+        } else t.members.push(m);
+      }
+    }
+    if (Array.isArray(t.wishlist)) {
+      t.wishlist = [];
+      for (const w of trip.wishlist) {
+        if (w?.photo && w.photo.length > 120000) {
+          t.wishlist.push({ ...w, photo: await shrinkDataUrl(w.photo, 400) });
+          changed = true;
+        } else t.wishlist.push(w);
+      }
+    }
+    out.push(t);
+  }
+  return changed ? out : null;
+}
+
 // 1つの旅行の中にある全リストのID重複を直す
 function repairTrip(trip) {
   const fixed = { ...trip };
@@ -742,12 +792,11 @@ function TripFormPanel({ initial, onSave, onClose }) {
     setMemberPhoto(null);
   };
 
-  const handlePhotoChange = (e) => {
+  const handlePhotoChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setMemberPhoto(reader.result);
-    reader.readAsDataURL(file);
+    // メンバーのアイコンは小さく表示されるので、160pxまで圧縮する
+    try { setMemberPhoto(await readImageCompressed(file, 160)); } catch (err) { /* 失敗時は何もしない */ }
   };
 
   const handleSave = () => {
@@ -864,12 +913,13 @@ function TripFormPanel({ initial, onSave, onClose }) {
                   <MemberAvatar member={m} size={34} />
                   <input
                     type="file" accept="image/*" style={{ display: "none" }}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = () => setMembers(members.map((x, idx) => (idx === i ? { ...x, photo: reader.result } : x)));
-                      reader.readAsDataURL(file);
+                      try {
+                        const data = await readImageCompressed(file, 160);
+                        setMembers(members.map((x, idx) => (idx === i ? { ...x, photo: data } : x)));
+                      } catch (err) { /* 失敗時は何もしない */ }
                     }}
                   />
                 </label>
@@ -2151,6 +2201,8 @@ export default function App() {
     setTimeout(() => setToast(""), 3500);
   };
 
+  const shrinkDone = useRef(false);
+
   // Firestoreをリアルタイム監視(家族の誰かの編集がすぐ反映される)
   useEffect(() => {
     const unsub = onSnapshot(
@@ -2159,7 +2211,19 @@ export default function App() {
         const value = snap.exists() ? snap.data().value : [];
         const arr = Array.isArray(value) ? value : [];
         // 読み込むたびにID重複を直す(過去に作られた重複データの修復)
-        setTrips(dedupeIds(arr).map(repairTrip));
+        const fixed = dedupeIds(arr).map(repairTrip);
+        setTrips(fixed);
+
+        // 初回だけ、大きすぎる画像を縮めて保存し直す(容量オーバー対策)
+        if (!shrinkDone.current) {
+          shrinkDone.current = true;
+          shrinkTripImages(fixed).then((shrunk) => {
+            if (shrunk) {
+              setTrips(shrunk);
+              setDoc(TRIPS_DOC, { value: shrunk }).catch(() => {});
+            }
+          });
+        }
       },
       () => setTrips([])
     );
@@ -2169,11 +2233,17 @@ export default function App() {
   // 保存(書き込み)
   const persist = async (newTrips) => {
     setTrips(newTrips);
+    // 保存前に、データが大きすぎないか自分で確かめる(Firestoreの上限は約1MB)
+    const size = new Blob([JSON.stringify(newTrips)]).size;
+    if (size > 950000) {
+      setSaveError("データが上限に近づいています。写真を減らすか小さくしてください");
+      return;
+    }
     try {
       await setDoc(TRIPS_DOC, { value: newTrips });
       setSaveError(false);
     } catch (e) {
-      setSaveError(true);
+      setSaveError("保存できませんでした。通信環境をご確認ください");
     }
   };
 
@@ -2201,7 +2271,7 @@ export default function App() {
   return (
     <div className="app-root">
       <style>{STYLES}</style>
-      {saveError && <div className="save-error">保存できませんでした。通信環境をご確認ください</div>}
+      {saveError && <div className="save-error">{typeof saveError === "string" ? saveError : "保存できませんでした。通信環境をご確認ください"}</div>}
       {toast && <div className="save-error">{toast}</div>}
 
       {view === "home" && (
