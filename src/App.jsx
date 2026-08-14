@@ -2233,17 +2233,26 @@ export default function App() {
   // 保存(書き込み)
   const persist = async (newTrips) => {
     setTrips(newTrips);
-    // 保存前に、データが大きすぎないか自分で確かめる(Firestoreの上限は約1MB)
     const size = new Blob([JSON.stringify(newTrips)]).size;
+    const kb = Math.round(size / 1024);
     if (size > 950000) {
-      setSaveError("データが上限に近づいています。写真を減らすか小さくしてください");
+      setSaveError(`データが上限に近づいています(${kb}KB)。写真を減らすか小さくしてください`);
       return;
     }
     try {
       await setDoc(TRIPS_DOC, { value: newTrips });
       setSaveError(false);
     } catch (e) {
-      setSaveError("保存できませんでした。通信環境をご確認ください");
+      // 原因が分かるよう、エラーの中身とデータ量をそのまま表示する
+      const code = e?.code || "";
+      const msg = e?.message || String(e);
+      if (code === "invalid-argument" || msg.includes("exceeds the maximum") || msg.includes("1048487")) {
+        setSaveError(`データが大きすぎて保存できません(${kb}KB)。写真を減らしてください`);
+      } else if (code === "permission-denied") {
+        setSaveError("保存が許可されていません(Firestoreのルールをご確認ください)");
+      } else {
+        setSaveError(`保存できませんでした(${kb}KB / ${code || "不明"}:${msg.slice(0, 80)})`);
+      }
     }
   };
 
