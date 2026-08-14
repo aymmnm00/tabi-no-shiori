@@ -184,6 +184,16 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-filter-label { font-size:10.5px; font-weight:700; opacity:0.55; width:100%; }
 .wish-chip { background:#F1F5F8; color:var(--navy); border:none; border-radius:999px; padding:5px 11px; font-size:12px; font-weight:700; cursor:pointer; }
 .wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
+.member-select { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.member-select-btn { display:inline-flex; align-items:center; gap:5px; background:#F1F5F8; color:var(--navy); border:none; border-radius:999px; padding:4px 10px 4px 4px; font-size:11.5px; font-weight:700; cursor:pointer; }
+.member-select-btn.on { background:#E3F4FC; color:var(--sky-deep); box-shadow:0 0 0 1.5px var(--sky-deep) inset; }
+.member-mark { background:none; border:none; padding:0; cursor:pointer; display:flex; align-items:center; flex-shrink:0; }
+.thumb { width:44px; height:44px; border-radius:10px; object-fit:cover; flex-shrink:0; cursor:pointer; }
+.thumb-pick { width:44px; height:44px; border-radius:10px; border:1.5px dashed var(--sky-soft); background:#F7FBFD; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; overflow:hidden; }
+.thumb-pick img { width:100%; height:100%; object-fit:cover; }
+.thumb-pick.small { width:36px; height:36px; }
+.thumb-zoom { position:absolute; left:0; right:0; top:100%; z-index:10; background:white; border-radius:14px; padding:8px; box-shadow:0 6px 20px rgba(63,169,224,0.22); }
+.thumb-zoom img { width:100%; border-radius:10px; display:block; }
 .wish-photo { width:100%; max-height:170px; object-fit:cover; border-radius:12px; margin-top:8px; display:block; }
 .wish-memo { font-size:11.5px; opacity:0.75; margin-top:4px; line-height:1.5; white-space:pre-wrap; }
 .wish-photo-preview { width:100%; max-height:150px; object-fit:cover; border-radius:12px; margin-top:6px; display:block; }
@@ -206,10 +216,10 @@ const WISH_ICONS = [
   { icon: "☕", label: "カフェ" },
   { icon: "🍽", label: "レストラン" },
   { icon: "🥐", label: "ベーカリー" },
-  { icon: "🍦", label: "アイス" },
   { icon: "🍫", label: "チョコレート" },
   { icon: "🍔", label: "軽食" },
   { icon: "🍰", label: "スイーツ" },
+  { icon: "🍦", label: "アイス" },
   { icon: "🍷", label: "バー" },
   { icon: "🛍", label: "買い物" },
   { icon: "🏨", label: "ホテル" },
@@ -691,6 +701,36 @@ function MemberAvatar({ member, size = 20 }) {
   );
 }
 
+// 項目の担当メンバーを選ぶ小さな部品(未選択も可)
+function MemberSelect({ members, value, onChange }) {
+  if (!members || members.length === 0) return null;
+  return (
+    <div className="member-select">
+      {members.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          className={`member-select-btn${value === m.id ? " on" : ""}`}
+          onClick={() => onChange(value === m.id ? null : m.id)}
+        >
+          <MemberAvatar member={m} size={18} />
+          {m.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// 担当メンバーのアイコン(未設定なら人型の薄いマーク)
+function MemberMark({ members, memberId, onClick }) {
+  const m = (members || []).find((x) => x.id === memberId);
+  return (
+    <button className="member-mark" onClick={onClick} type="button" title={m ? m.name : "担当を選ぶ"}>
+      {m ? <MemberAvatar member={m} size={24} /> : <Users size={14} style={{ opacity: 0.35 }} />}
+    </button>
+  );
+}
+
 function MemberChip({ member, onRemove }) {
   return (
     <span className="chip" style={{ paddingLeft: 3 }}>
@@ -731,20 +771,47 @@ function CheckRow({ item, onToggle, onEdit, dateLabel }) {
 }
 
 /* ============================== 汎用チェックリストタブ(持ち物/買うもの) ============================== */
-function SimpleChecklistTab({ list, setList, placeholder, emptyText }) {
+function SimpleChecklistTab({ list, setList, placeholder, emptyText, withPhoto, members }) {
   const [text, setText] = useState("");
+  const [photo, setPhoto] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [zoomId, setZoomId] = useState(null);   // 写真を大きく見ている項目
+  const [memberId, setMemberId] = useState(null);   // 新規追加時の担当
+  const [pickingId, setPickingId] = useState(null); // 担当を選び直している項目
+
   const add = () => {
     if (!text.trim()) return;
-    setList([...list, { id: newId(), text: text.trim(), checked: false }]);
-    setText("");
+    setList([...list, { id: newId(), text: text.trim(), checked: false, ...(photo ? { photo } : {}), ...(memberId ? { memberId } : {}) }]);
+    setText(""); setPhoto(null);
   };
   const toggle = (id) => setList(list.map((i) => (i.id === id ? { ...i, checked: !i.checked } : i)));
   const remove = (id) => setList(list.filter((i) => i.id !== id));
-  const [deletingId, setDeletingId] = useState(null);
+
+  const pickPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try { setPhoto(await readImageCompressed(file, 400)); } catch (err) { /* 失敗時は何もしない */ }
+  };
+
+  // 既存の項目に写真を後から足す / 差し替える
+  const setItemPhoto = async (e, id) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const data = await readImageCompressed(file, 400);
+      setList(list.map((i) => (i.id === id ? { ...i, photo: data } : i)));
+    } catch (err) { /* 失敗時は何もしない */ }
+  };
 
   return (
     <div className="tab-content">
       <div className="add-inline">
+        {withPhoto && (
+          <label className="thumb-pick">
+            {photo ? <img src={photo} alt="" /> : <Plus size={16} style={{ opacity: 0.4 }} />}
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={pickPhoto} />
+          </label>
+        )}
         <input
           className="field-input"
           placeholder={placeholder}
@@ -754,6 +821,14 @@ function SimpleChecklistTab({ list, setList, placeholder, emptyText }) {
         />
         <button className="btn-mini" onClick={add}><Plus size={14} />追加</button>
       </div>
+      {withPhoto && <div className="field-hint">左の四角をタップすると写真を選べます(任意)</div>}
+      {members?.length > 0 && (
+        <>
+          <div className="field-hint" style={{ marginTop: 6 }}>誰の分?(任意)</div>
+          <MemberSelect members={members} value={memberId} onChange={setMemberId} />
+        </>
+      )}
+
       <div className="card-list">
         {list.length === 0 && <div className="empty-state">{emptyText}</div>}
         {list.map((item) =>
@@ -767,11 +842,52 @@ function SimpleChecklistTab({ list, setList, placeholder, emptyText }) {
             </div>
           ) : (
             <div className="check-row" key={item.id} style={{ position: "relative" }}>
-              <button className={`check-circle${item.checked ? "" : ""}`} onClick={() => toggle(item.id)} style={item.checked ? { background: "var(--green)", borderColor: "var(--green)", color: "white" } : {}}>
+              <button className="check-circle" onClick={() => toggle(item.id)} style={item.checked ? { background: "var(--green)", borderColor: "var(--green)", color: "white" } : {}}>
                 {item.checked && <Check size={14} />}
               </button>
+
+              {withPhoto && (
+                item.photo ? (
+                  <img
+                    src={item.photo} alt="" className="thumb"
+                    style={item.checked ? { opacity: 0.45 } : {}}
+                    onClick={() => setZoomId(zoomId === item.id ? null : item.id)}
+                  />
+                ) : (
+                  <label className="thumb-pick small">
+                    <Plus size={13} style={{ opacity: 0.4 }} />
+                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => setItemPhoto(e, item.id)} />
+                  </label>
+                )
+              )}
+
               <span className="check-text" style={item.checked ? { textDecoration: "line-through", opacity: 0.45 } : {}}>{item.text}</span>
+
+              {members?.length > 0 && (
+                <MemberMark
+                  members={members} memberId={item.memberId}
+                  onClick={() => setPickingId(pickingId === item.id ? null : item.id)}
+                />
+              )}
               <button className="icon-btn faint" onClick={() => setDeletingId(item.id)}><X size={16} /></button>
+
+              {pickingId === item.id && (
+                <div className="thumb-zoom">
+                  <MemberSelect
+                    members={members} value={item.memberId}
+                    onChange={(mid) => {
+                      setList(list.map((i) => (i.id === item.id ? { ...i, memberId: mid } : i)));
+                      setPickingId(null);
+                    }}
+                  />
+                </div>
+              )}
+
+              {zoomId === item.id && item.photo && (
+                <div className="thumb-zoom" onClick={() => setZoomId(null)}>
+                  <img src={item.photo} alt="" />
+                </div>
+              )}
             </div>
           )
         )}
@@ -1256,12 +1372,14 @@ function TodoForm({ trip, initial, phase, onSave, onCancel }) {
   const [time, setTime] = useState(initial?.time || "");
   const [timeZone, setTimeZone] = useState(initial?.timeZone || "jst");
   const [location, setLocation] = useState(initial?.location || "");
+  const [memberId, setMemberId] = useState(initial?.memberId || null);
 
   const save = () => {
     if (!text.trim()) return;
     onSave({
       id: initial?.id || newId(),
       text: text.trim(), checked: initial?.checked || false,
+      memberId: memberId || undefined,
       date: expanded ? (date || undefined) : undefined,
       time: expanded ? (time || undefined) : undefined,
       location: expanded ? (location || undefined) : undefined,
@@ -1272,6 +1390,12 @@ function TodoForm({ trip, initial, phase, onSave, onCancel }) {
   return (
     <div className="mini-form">
       <input className="field-input" placeholder="やることを入力" value={text} onChange={(e) => setText(e.target.value)} />
+      {trip.members?.length > 0 && (
+        <>
+          <div className="field-hint" style={{ marginTop: 6 }}>誰の担当?(任意)</div>
+          <MemberSelect members={trip.members} value={memberId} onChange={setMemberId} />
+        </>
+      )}
       {!expanded ? (
         <button className="link-btn" onClick={() => setExpanded(true)} type="button" style={{ alignSelf: "flex-start" }}>日時・場所を追加</button>
       ) : (
@@ -1351,6 +1475,9 @@ function TodoTab({ trip, updateTrip }) {
                   </div>
                 )}
               </div>
+              {trip.members?.length > 0 && item.memberId && (
+                <MemberMark members={trip.members} memberId={item.memberId} onClick={() => setEditingId(item.id)} />
+              )}
               <button className="icon-btn faint" onClick={() => setDeletingId(item.id)}><X size={16} /></button>
             </div>
           )
@@ -1864,12 +1991,14 @@ function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onTo
         <SimpleChecklistTab
           list={trip.packingList} setList={(l) => updateTrip({ ...trip, packingList: l })}
           placeholder="持ち物を入力(例:パスポート)" emptyText="持ち物はまだありません"
+          members={trip.members}
         />
       )}
       {tab === "shopping" && (
         <SimpleChecklistTab
           list={trip.shoppingList} setList={(l) => updateTrip({ ...trip, shoppingList: l })}
           placeholder="買うものを入力(例:お土産)" emptyText="現地で買いたいものはまだありません"
+          withPhoto members={trip.members}
         />
       )}
       {tab === "todo" && <TodoTab trip={trip} updateTrip={updateTrip} />}
