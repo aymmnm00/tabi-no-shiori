@@ -374,6 +374,21 @@ async function shrinkTripImages(trips) {
   return changed ? out : null;
 }
 
+// Firestoreは「未定義(undefined)」の値を受け付けないため、保存前に取り除く
+// (例:到着時刻を空欄にした予定は endTime が未定義になり、保存に失敗していた)
+function stripUndefined(value) {
+  if (Array.isArray(value)) return value.map(stripUndefined);
+  if (value && typeof value === "object") {
+    const out = {};
+    Object.entries(value).forEach(([k, v]) => {
+      if (v === undefined) return;
+      out[k] = stripUndefined(v);
+    });
+    return out;
+  }
+  return value;
+}
+
 // 1つの旅行の中にある全リストのID重複を直す
 function repairTrip(trip) {
   const fixed = { ...trip };
@@ -2220,7 +2235,7 @@ export default function App() {
           shrinkTripImages(fixed).then((shrunk) => {
             if (shrunk) {
               setTrips(shrunk);
-              setDoc(TRIPS_DOC, { value: shrunk }).catch(() => {});
+              setDoc(TRIPS_DOC, { value: stripUndefined(shrunk) }).catch(() => {});
             }
           });
         }
@@ -2231,8 +2246,10 @@ export default function App() {
   }, []);
 
   // 保存(書き込み)
-  const persist = async (newTrips) => {
-    setTrips(newTrips);
+  const persist = async (rawTrips) => {
+    setTrips(rawTrips);
+    // 未定義の項目を取り除いてから保存する
+    const newTrips = stripUndefined(rawTrips);
     const size = new Blob([JSON.stringify(newTrips)]).size;
     const kb = Math.round(size / 1024);
     if (size > 950000) {
@@ -2246,7 +2263,7 @@ export default function App() {
       // 原因が分かるよう、エラーの中身とデータ量をそのまま表示する
       const code = e?.code || "";
       const msg = e?.message || String(e);
-      if (code === "invalid-argument" || msg.includes("exceeds the maximum") || msg.includes("1048487")) {
+      if (msg.includes("exceeds the maximum") || msg.includes("1048487")) {
         setSaveError(`データが大きすぎて保存できません(${kb}KB)。写真を減らしてください`);
       } else if (code === "permission-denied") {
         setSaveError("保存が許可されていません(Firestoreのルールをご確認ください)");
