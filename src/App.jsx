@@ -184,6 +184,11 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-filter-label { font-size:10.5px; font-weight:700; opacity:0.55; width:100%; }
 .wish-chip { background:#F1F5F8; color:var(--navy); border:none; border-radius:999px; padding:5px 11px; font-size:12px; font-weight:700; cursor:pointer; }
 .wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
+.travel-row { display:flex; align-items:center; justify-content:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--sky-deep); opacity:0.85; padding:2px 0; }
+.travel-bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; background:white; border-radius:16px; padding:9px 12px; margin-bottom:10px; box-shadow:0 3px 10px rgba(63,169,224,0.07); }
+.travel-bar-label { font-size:10.5px; font-weight:700; opacity:0.55; }
+.travel-row .dash { flex:1; height:0; border-top:1.5px dotted var(--sky-soft); }
+.travel-modes { display:flex; gap:6px; }
 .member-select { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
 .member-select-btn { display:inline-flex; align-items:center; gap:5px; background:#F1F5F8; color:var(--navy); border:none; border-radius:999px; padding:4px 10px 4px 4px; font-size:11.5px; font-weight:700; cursor:pointer; }
 .member-select-btn.on { background:#E3F4FC; color:var(--sky-deep); box-shadow:0 0 0 1.5px var(--sky-deep) inset; }
@@ -382,6 +387,43 @@ async function shrinkTripImages(trips) {
     out.push(t);
   }
   return changed ? out : null;
+}
+
+// Googleの経路検索(Routes API)で、2地点間の所要時間を調べる
+const GOOGLE_API_KEY = "AIzaSyD0W1NBQJqm68scksMwyvwAGcKFZ5sl__8";
+const TRAVEL_MODES = [
+  { key: "WALK", label: "徒歩", icon: "🚶" },
+  { key: "TRANSIT", label: "公共交通", icon: "🚇" },
+  { key: "DRIVE", label: "車", icon: "🚗" },
+];
+
+async function fetchTravelTime(from, to, mode) {
+  try {
+    const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_API_KEY,
+        "X-Goog-FieldMask": "routes.duration,routes.distanceMeters",
+      },
+      body: JSON.stringify({
+        origin: { location: { latLng: { latitude: from.lat, longitude: from.lng } } },
+        destination: { location: { latLng: { latitude: to.lat, longitude: to.lng } } },
+        travelMode: mode,
+      }),
+    });
+    const data = await res.json();
+    const route = data?.routes?.[0];
+    if (!route) return null;
+    const seconds = Number(String(route.duration || "0s").replace("s", ""));
+    return {
+      mode,
+      minutes: Math.max(1, Math.round(seconds / 60)),
+      km: route.distanceMeters ? Math.round(route.distanceMeters / 100) / 10 : null,
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 // Firestoreは「未定義(undefined)」の値を受け付けないため、保存前に取り除く
@@ -1248,6 +1290,8 @@ function ScheduleTab({ trip, updateTrip }) {
   const [activeDate, setActiveDate] = useState(allDates[0]);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [travelMode, setTravelMode] = useState("WALK");
+  const [travelBusy, setTravelBusy] = useState(false);
 
   const days = trip.days || {};
   const dayItems = days[activeDate] || [];
@@ -1302,6 +1346,45 @@ function ScheduleTab({ trip, updateTrip }) {
     updateTrip({ ...trip, todos: { ...trip.todos, [phase]: list } });
   };
 
+  /* ---- 移動時間 ----
+     調べた結果は trip.travelTimes に保存しておき、同じ区間は二度調べない
+     (Googleへの問い合わせ回数を抑えるため) */
+  const travelTimes = trip.travelTimes || {};
+  // 予定の「到着地(なければ出発地)」から、次の予定の「出発地(なければ到着地)」までを調べる
+  const pointOf = (it, which) =>
+    typeof it.lat === "number" ? { lat: it.lat, lng: it.lng } : null;
+  const travelKey = (a, b, mode) =>
+    `${a.lat.toFixed(4)},${a.lng.toFixed(4)}>${b.lat.toFixed(4)},${b.lng.toFixed(4)}:${mode}`;
+
+  // 隣り合う予定の組を作る(両方に座標があるものだけ)
+  const legs = [];
+  const scheduleOnly = combined.filter((c) => c.kind === "schedule");
+  for (let i = 0; i < scheduleOnly.length - 1; i++) {
+    const a = pointOf(scheduleOnly[i]);
+    const b = pointOf(scheduleOnly[i + 1]);
+    if (a && b) legs.push({ afterId: scheduleOnly[i].id, a, b });
+  }
+
+  const lookupTravel = (afterId, mode) => {
+    const leg = legs.find((l) => l.afterId === afterId);
+    if (!leg) return null;
+    return travelTimes[travelKey(leg.a, leg.b, mode)] || null;
+  };
+
+  // この日の未取得の区間をまとめて調べる
+  const fetchDayTravel = async () => {
+    setTravelBusy(true);
+    const next = { ...travelTimes };
+    for (const leg of legs) {
+      const key = travelKey(leg.a, leg.b, travelMode);
+      if (next[key]) continue;
+      const r = await fetchTravelTime(leg.a, leg.b, travelMode);
+      if (r) next[key] = { minutes: r.minutes, km: r.km };
+    }
+    updateTrip({ ...trip, travelTimes: next });
+    setTravelBusy(false);
+  };
+
   return (
     <div className="tab-content">
       <div className="day-tabs">
@@ -1311,6 +1394,22 @@ function ScheduleTab({ trip, updateTrip }) {
           </button>
         ))}
       </div>
+
+      {legs.length > 0 && (
+        <div className="travel-bar">
+          <span className="travel-bar-label">移動時間</span>
+          {TRAVEL_MODES.map((m) => (
+            <button
+              key={m.key}
+              className={`wish-chip${travelMode === m.key ? " on" : ""}`}
+              onClick={() => setTravelMode(m.key)}
+            >{m.icon} {m.label}</button>
+          ))}
+          <button className="btn-mini" onClick={fetchDayTravel} disabled={travelBusy}>
+            {travelBusy ? "調べています…" : "調べる"}
+          </button>
+        </div>
+      )}
 
       {carryover && (
         <div className="carryover-card">
@@ -1322,8 +1421,24 @@ function ScheduleTab({ trip, updateTrip }) {
         {combined.length === 0 && !carryover && (
           <div className="empty-state"><Calendar size={26} />この日の予定はまだありません</div>
         )}
-        {combined.map((item) =>
-          item.kind === "schedule" ? (
+        {combined.map((item, idx) => (
+          <React.Fragment key={item.id}>
+            {idx > 0 && item.kind === "schedule" && (() => {
+              // ひとつ前の予定から、この予定までの移動時間
+              const prev = combined[idx - 1];
+              if (prev?.kind !== "schedule") return null;
+              const t = lookupTravel(prev.id, travelMode);
+              if (!t) return null;
+              return (
+                <div className="travel-row">
+                  <span className="dash" />
+                  {TRAVEL_MODES.find((m) => m.key === travelMode)?.icon || "🚶"} 約{t.minutes}分
+                  {t.km != null ? ` (${t.km}km)` : ""}
+                  <span className="dash" />
+                </div>
+              );
+            })()}
+            {item.kind === "schedule" ? (
             editingId === item.id ? (
               <ScheduleForm key={item.id} initial={item} trip={trip} onSave={saveItem} onCancel={() => setEditingId(null)} />
             ) : (
@@ -1350,8 +1465,9 @@ function ScheduleTab({ trip, updateTrip }) {
                 {item.checked && <Check size={14} />}
               </button>
             </div>
-          )
-        )}
+            )}
+          </React.Fragment>
+        ))}
       </div>
 
       {adding ? (
