@@ -186,6 +186,9 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
 .travel-row { display:flex; align-items:center; justify-content:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--sky-deep); opacity:0.85; padding:2px 0; }
 .travel-bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; background:white; border-radius:16px; padding:9px 12px; margin-bottom:10px; box-shadow:0 3px 10px rgba(63,169,224,0.07); }
+.travel-best { font-weight:700; color:var(--sky-deep); }
+.travel-sub { font-weight:500; color:var(--navy); opacity:0.45; }
+.travel-sep { opacity:0.3; }
 .travel-bar-label { font-size:10.5px; font-weight:700; opacity:0.55; }
 .travel-row .dash { flex:1; height:0; border-top:1.5px dotted var(--sky-soft); }
 .travel-modes { display:flex; gap:6px; }
@@ -1290,7 +1293,6 @@ function ScheduleTab({ trip, updateTrip }) {
   const [activeDate, setActiveDate] = useState(allDates[0]);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [travelMode, setTravelMode] = useState("WALK");
   const [travelBusy, setTravelBusy] = useState(false);
 
   const days = trip.days || {};
@@ -1365,21 +1367,27 @@ function ScheduleTab({ trip, updateTrip }) {
     if (a && b) legs.push({ afterId: scheduleOnly[i].id, a, b });
   }
 
-  const lookupTravel = (afterId, mode) => {
+  // 徒歩と公共交通の両方の結果を返す
+  const lookupTravel = (afterId) => {
     const leg = legs.find((l) => l.afterId === afterId);
     if (!leg) return null;
-    return travelTimes[travelKey(leg.a, leg.b, mode)] || null;
+    const walk = travelTimes[travelKey(leg.a, leg.b, "WALK")] || null;
+    const transit = travelTimes[travelKey(leg.a, leg.b, "TRANSIT")] || null;
+    if (!walk && !transit) return null;
+    return { walk, transit };
   };
 
-  // この日の未取得の区間をまとめて調べる
+  // この日の未取得の区間を、徒歩と公共交通の両方まとめて調べる
   const fetchDayTravel = async () => {
     setTravelBusy(true);
     const next = { ...travelTimes };
     for (const leg of legs) {
-      const key = travelKey(leg.a, leg.b, travelMode);
-      if (next[key]) continue;
-      const r = await fetchTravelTime(leg.a, leg.b, travelMode);
-      if (r) next[key] = { minutes: r.minutes, km: r.km };
+      for (const mode of ["WALK", "TRANSIT"]) {
+        const key = travelKey(leg.a, leg.b, mode);
+        if (next[key]) continue;
+        const r = await fetchTravelTime(leg.a, leg.b, mode);
+        if (r) next[key] = { minutes: r.minutes, km: r.km };
+      }
     }
     updateTrip({ ...trip, travelTimes: next });
     setTravelBusy(false);
@@ -1397,14 +1405,7 @@ function ScheduleTab({ trip, updateTrip }) {
 
       {legs.length > 0 && (
         <div className="travel-bar">
-          <span className="travel-bar-label">移動時間</span>
-          {TRAVEL_MODES.map((m) => (
-            <button
-              key={m.key}
-              className={`wish-chip${travelMode === m.key ? " on" : ""}`}
-              onClick={() => setTravelMode(m.key)}
-            >{m.icon} {m.label}</button>
-          ))}
+          <span className="travel-bar-label">予定の間の移動時間(🚶徒歩 / 🚇公共交通)</span>
           <button className="btn-mini" onClick={fetchDayTravel} disabled={travelBusy}>
             {travelBusy ? "調べています…" : "調べる"}
           </button>
@@ -1427,13 +1428,27 @@ function ScheduleTab({ trip, updateTrip }) {
               // ひとつ前の予定から、この予定までの移動時間
               const prev = combined[idx - 1];
               if (prev?.kind !== "schedule") return null;
-              const t = lookupTravel(prev.id, travelMode);
+              const t = lookupTravel(prev.id);
               if (!t) return null;
+              // 速い方を濃く表示する
+              const faster =
+                t.walk && t.transit
+                  ? (t.walk.minutes <= t.transit.minutes ? "walk" : "transit")
+                  : (t.walk ? "walk" : "transit");
               return (
                 <div className="travel-row">
                   <span className="dash" />
-                  {TRAVEL_MODES.find((m) => m.key === travelMode)?.icon || "🚶"} 約{t.minutes}分
-                  {t.km != null ? ` (${t.km}km)` : ""}
+                  {t.walk && (
+                    <span className={faster === "walk" ? "travel-best" : "travel-sub"}>
+                      🚶 {t.walk.minutes}分
+                    </span>
+                  )}
+                  {t.walk && t.transit && <span className="travel-sep">/</span>}
+                  {t.transit && (
+                    <span className={faster === "transit" ? "travel-best" : "travel-sub"}>
+                      🚇 {t.transit.minutes}分
+                    </span>
+                  )}
                   <span className="dash" />
                 </div>
               );
