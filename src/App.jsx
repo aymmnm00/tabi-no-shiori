@@ -4,7 +4,7 @@ import { db } from "./firebaseClient";
 import {
   Plus, X, MapPin, Calendar, Package, ShoppingCart, ListChecks, Ticket,
   ArrowLeft, Archive, ExternalLink, Check, Menu, Trash2, Pencil, Download,
-  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart, Map, Lock,
+  Users, ChevronRight, RotateCcw, Sparkles, ArrowRight, Heart, Map, Lock, Wallet,
 } from "lucide-react";
 
 /* ============================== スタイル ============================== */
@@ -186,6 +186,14 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
 .travel-row { display:flex; align-items:center; justify-content:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--sky-deep); opacity:0.85; padding:2px 0; }
 .travel-bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; background:white; border-radius:16px; padding:9px 12px; margin-bottom:10px; box-shadow:0 3px 10px rgba(63,169,224,0.07); }
+.settle-box { background:linear-gradient(135deg,#EAF6FB,#F5FBFD); border-radius:16px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
+.settle-title { font-family:'Zen Maru Gothic', sans-serif; font-weight:700; font-size:13px; color:var(--navy); }
+.settle-row { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--navy); }
+.settle-from { color:#C25B3E; }
+.settle-to { color:var(--sky-deep); }
+.settle-amt { margin-left:auto; font-family:'Zen Maru Gothic', sans-serif; font-weight:900; color:var(--sky-deep); }
+.settle-total { font-size:11.5px; opacity:0.6; text-align:center; }
+.exp-amt { font-weight:900; color:var(--sky-deep); margin-left:6px; }
 .travel-best { font-weight:700; color:var(--sky-deep); }
 .travel-sub { font-weight:500; color:var(--navy); opacity:0.45; }
 .travel-sep { opacity:0.3; }
@@ -2073,7 +2081,148 @@ const TABS = [
   { key: "reservation", label: "予約", icon: Ticket },
   { key: "wishlist", label: "行きたいところ", icon: Heart },
   { key: "map", label: "地図", icon: Map },
+  { key: "split", label: "割り勘", icon: Wallet },
 ];
+
+/* ============================== 割り勘タブ ============================== */
+function SplitTab({ trip, updateTrip }) {
+  const members = trip.members || [];
+  const expenses = trip.expenses || [];
+
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [payerId, setPayerId] = useState(members[0]?.id || null);
+  const [forIds, setForIds] = useState(members.map((m) => m.id));
+  const [deletingId, setDeletingId] = useState(null);
+
+  const setList = (l) => updateTrip({ ...trip, expenses: l });
+
+  const add = () => {
+    const yen = Number(amount);
+    if (!title.trim() || !yen || !payerId || forIds.length === 0) return;
+    setList([...expenses, {
+      id: newId(), title: title.trim(), amount: yen, payerId, forIds: [...forIds],
+    }]);
+    setTitle(""); setAmount("");
+  };
+
+  const remove = (id) => { setList(expenses.filter((e) => e.id !== id)); setDeletingId(null); };
+  const toggleFor = (id) =>
+    setForIds(forIds.includes(id) ? forIds.filter((x) => x !== id) : [...forIds, id]);
+
+  const nameOf = (id) => members.find((m) => m.id === id)?.name || "?";
+
+  /* ---- 精算の計算 ----
+     各人の「払った額 − 自分が負担すべき額」を出し、
+     マイナスの人(払い足りない人)からプラスの人(多く払った人)へ渡す */
+  const balance = {};
+  members.forEach((m) => { balance[m.id] = 0; });
+  expenses.forEach((e) => {
+    if (balance[e.payerId] !== undefined) balance[e.payerId] += e.amount;
+    const share = e.amount / e.forIds.length;
+    e.forIds.forEach((id) => { if (balance[id] !== undefined) balance[id] -= share; });
+  });
+
+  const owers = members.filter((m) => balance[m.id] < -0.5)
+    .map((m) => ({ id: m.id, amt: -balance[m.id] }))
+    .sort((a, b) => b.amt - a.amt);
+  const receivers = members.filter((m) => balance[m.id] > 0.5)
+    .map((m) => ({ id: m.id, amt: balance[m.id] }))
+    .sort((a, b) => b.amt - a.amt);
+
+  const settlements = [];
+  let oi = 0, ri = 0;
+  const ow = owers.map((o) => ({ ...o }));
+  const rc = receivers.map((r) => ({ ...r }));
+  while (oi < ow.length && ri < rc.length) {
+    const pay = Math.min(ow[oi].amt, rc[ri].amt);
+    settlements.push({ from: ow[oi].id, to: rc[ri].id, amount: Math.round(pay) });
+    ow[oi].amt -= pay; rc[ri].amt -= pay;
+    if (ow[oi].amt < 0.5) oi++;
+    if (rc[ri].amt < 0.5) ri++;
+  }
+
+  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const yen = (n) => `¥${Math.round(n).toLocaleString()}`;
+
+  if (members.length < 2) {
+    return (
+      <div className="tab-content">
+        <div className="empty-state"><Wallet size={26} />メンバーを2人以上追加すると使えます</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="tab-content">
+      <div className="mini-form">
+        <label className="field-label">何の費用?</label>
+        <input className="field-input" placeholder="例:タパス代" value={title} onChange={(e) => setTitle(e.target.value)} />
+
+        <label className="field-label">金額(円)</label>
+        <input type="number" inputMode="numeric" className="field-input" placeholder="例:6000" value={amount} onChange={(e) => setAmount(e.target.value)} />
+
+        <label className="field-label">払った人</label>
+        <MemberSelect members={members} value={payerId} onChange={(id) => setPayerId(id || payerId)} />
+
+        <label className="field-label">誰の分?(均等に割ります)</label>
+        <div className="member-select">
+          {members.map((m) => (
+            <button
+              key={m.id} type="button"
+              className={`member-select-btn${forIds.includes(m.id) ? " on" : ""}`}
+              onClick={() => toggleFor(m.id)}
+            >
+              <MemberAvatar member={m} size={18} />{m.name}
+            </button>
+          ))}
+        </div>
+
+        <button className="btn-mini full" onClick={add}><Plus size={14} />費用を追加</button>
+      </div>
+
+      {settlements.length > 0 && (
+        <div className="settle-box">
+          <div className="settle-title">精算</div>
+          {settlements.map((st, i) => (
+            <div className="settle-row" key={i}>
+              <span className="settle-from">{nameOf(st.from)}</span>
+              <ArrowRight size={14} style={{ opacity: 0.5 }} />
+              <span className="settle-to">{nameOf(st.to)}</span>
+              <span className="settle-amt">{yen(st.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {expenses.length > 0 && (
+        <div className="settle-total">合計 {yen(total)}(1人あたり平均 {yen(total / members.length)})</div>
+      )}
+
+      <div className="card-list">
+        {expenses.length === 0 && <div className="empty-state"><Wallet size={26} />まだ費用がありません</div>}
+        {expenses.map((e) =>
+          deletingId === e.id ? (
+            <div className="mini-form" key={e.id}>
+              <ConfirmDelete message="削除しますか?" onConfirm={() => remove(e.id)} onCancel={() => setDeletingId(null)} />
+            </div>
+          ) : (
+            <div className="reservation-item" key={e.id}>
+              <div className="reservation-body">
+                <div className="reservation-name">{e.title} <span className="exp-amt">{yen(e.amount)}</span></div>
+                <div className="reservation-meta">
+                  <span>{nameOf(e.payerId)} が立替</span>
+                  <span>{e.forIds.map(nameOf).join("・")} の分</span>
+                </div>
+              </div>
+              <button className="icon-btn faint" onClick={() => setDeletingId(e.id)}><X size={16} /></button>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
 
 function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onToggleArchive, showToast }) {
   const [tab, setTab] = useState("schedule");
@@ -2136,6 +2285,7 @@ function TripDetail({ trip, updateTrip, onBack, onOpenDrawer, onDeleteTrip, onTo
       {tab === "reservation" && <ReservationTab trip={trip} updateTrip={updateTrip} />}
       {tab === "wishlist" && <WishlistTab trip={trip} updateTrip={updateTrip} />}
       {tab === "map" && <MapTab trip={trip} updateTrip={updateTrip} />}
+      {tab === "split" && <SplitTab trip={trip} updateTrip={updateTrip} />}
 
       <div style={{ textAlign: "center", marginTop: 12 }}>
         {confirmingDelete ? (
