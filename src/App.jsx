@@ -1748,7 +1748,7 @@ function WishlistTab({ trip, updateTrip }) {
           </>
         )}
 
-        <button className="btn-mini full" onClick={add}><Plus size={14} />行きたいところを追加</button>
+        <button className="btn-mini full" onClick={add}><Plus size={14} />スポットを追加</button>
       </div>
 
       {(countries.length > 0 || usedIcons.length > 1) && (
@@ -1786,7 +1786,7 @@ function WishlistTab({ trip, updateTrip }) {
       )}
 
       <div className="card-list">
-        {list.length === 0 && <div className="empty-state"><Heart size={26} />行きたいところはまだありません</div>}
+        {list.length === 0 && <div className="empty-state"><Heart size={26} />スポットはまだありません</div>}
         {list.length > 0 && shown.length === 0 && <div className="empty-state">条件に合う場所はありません</div>}
         {shown.map((item) =>
           editingId === item.id ? (
@@ -2047,7 +2047,7 @@ function MapTab({ trip, updateTrip }) {
 
       <div className="map-legend">
         <span><i className="legend-dot" style={{ background: "#3FA9E0" }} />番号=日程の予定</span>
-        <span><i className="legend-dot" style={{ background: "#FFB6B9" }} />絵文字=行きたいところ</span>
+        <span><i className="legend-dot" style={{ background: "#FFB6B9" }} />絵文字=スポット</span>
       </div>
 
       <button className="btn-mini full" onClick={fillCoords} disabled={busy}>
@@ -2075,13 +2075,13 @@ function MapTab({ trip, updateTrip }) {
 /* ============================== 旅行詳細ページ ============================== */
 const TABS = [
   { key: "schedule", label: "日程", icon: Calendar },
-  { key: "packing", label: "持ち物", icon: Package },
-  { key: "shopping", label: "買うもの", icon: ShoppingCart },
-  { key: "todo", label: "やること", icon: ListChecks },
-  { key: "reservation", label: "予約", icon: Ticket },
-  { key: "wishlist", label: "行きたいところ", icon: Heart },
+  { key: "wishlist", label: "スポット", icon: Heart },
   { key: "map", label: "地図", icon: Map },
-  { key: "split", label: "割り勘", icon: Wallet },
+  { key: "split", label: "お金", icon: Wallet },
+  { key: "shopping", label: "買うもの", icon: ShoppingCart },
+  { key: "reservation", label: "予約", icon: Ticket },
+  { key: "todo", label: "やること", icon: ListChecks },
+  { key: "packing", label: "持ち物", icon: Package },
 ];
 
 /* ============================== 割り勘タブ ============================== */
