@@ -1122,6 +1122,7 @@ function TripFormPanel({ initial, onSave, onClose }) {
           <div className="tz-toggle">
             <button className={`tz-btn${mapProvider === "google" ? " active" : ""}`} onClick={() => setMapProvider("google")} type="button">Googleマップ</button>
             <button className={`tz-btn${mapProvider === "citymapper" ? " active" : ""}`} onClick={() => setMapProvider("citymapper")} type="button">Citymapper</button>
+            <button className={`tz-btn${mapProvider === "naver" ? " active" : ""}`} onClick={() => setMapProvider("naver")} type="button">NAVER</button>
           </div>
           <div className="field-hint">場所をタップしたときに開く地図アプリです。Citymapperは公共交通機関が充実した都市向けです(パリなど)。</div>
 
