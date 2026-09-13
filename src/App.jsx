@@ -598,27 +598,11 @@ async function lookupCoords(place) {
 function openLocationLink(place, provider, coords) {
   if (!place) return;
 
-  if (provider === "citymapper") {
-    const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
-    const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
+  const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
+  const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
 
-    // 座標が分かっていない場合は、Googleマップで開く(Citymapperは座標がないと目的地を認識しないため)
-    if (lat === null || lng === null) {
-      window.location.href = mapsUrl(place);
-      return;
-      if (provider === "naver") {
-    const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
-    const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
-    const inKorea = lat !== null && lng !== null &&
-      lat >= 31.43 && lat <= 44.35 && lng >= 122.37 && lng <= 132.0;
-    if (!inKorea) {
-      window.location.href = mapsUrl(place);
-      return;
-    }
-    const appname = encodeURIComponent(window.location.hostname);
-    const appUrl =
-      `nmap://route/public?dlat=${lat}&dlng=${lng}` +
-      `&dname=${encodeURIComponent(place)}&appname=${appname}`;
+  // アプリを開き、開けなければGoogleマップに切り替える共通処理
+  const openApp = (appUrl) => {
     let switched = false;
     const onHide = () => { switched = true; };
     document.addEventListener("visibilitychange", onHide, { once: true });
@@ -627,31 +611,31 @@ function openLocationLink(place, provider, coords) {
       document.removeEventListener("visibilitychange", onHide);
       if (!switched && !document.hidden) window.location.href = mapsUrl(place);
     }, 1200);
-    return;
-  }  
+  };
+
+  if (provider === "citymapper") {
+    if (lat === null || lng === null) {
+      window.location.href = mapsUrl(place);
+      return;
     }
+    openApp(`citymapper://directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`);
+    return;
+  }
 
-    // Citymapperアプリを直接呼び出す。アプリが無ければウェブ版に切り替わる。
-    const appUrl = `citymapper://directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`;
-    const webUrl = `https://citymapper.com/directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`;
-
-    let switched = false;
-    const onHide = () => { switched = true; };
-    document.addEventListener("visibilitychange", onHide, { once: true });
-
-    window.location.href = appUrl;
-
-    // アプリが開かなかった場合だけ、ウェブ版に飛ばす
-    setTimeout(() => {
-      document.removeEventListener("visibilitychange", onHide);
-      if (!switched && !document.hidden) window.location.href = webUrl;
-    }, 1200);
+  if (provider === "naver") {
+    const inKorea = lat !== null && lng !== null &&
+      lat >= 31.43 && lat <= 44.35 && lng >= 122.37 && lng <= 132.0;
+    if (!inKorea) {
+      window.location.href = mapsUrl(place);
+      return;
+    }
+    const appname = encodeURIComponent(window.location.hostname);
+    openApp(`nmap://route/public?dlat=${lat}&dlng=${lng}&dname=${encodeURIComponent(place)}&appname=${appname}`);
     return;
   }
 
   window.location.href = mapsUrl(place);
 }
-
 /* ============================== サンプルデータ ============================== */
 const sampleTrips = [
   {
