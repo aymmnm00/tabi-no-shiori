@@ -606,6 +606,29 @@ function openLocationLink(place, provider, coords) {
     if (lat === null || lng === null) {
       window.location.href = mapsUrl(place);
       return;
+      if (provider === "naver") {
+    const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
+    const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
+    const inKorea = lat !== null && lng !== null &&
+      lat >= 31.43 && lat <= 44.35 && lng >= 122.37 && lng <= 132.0;
+    if (!inKorea) {
+      window.location.href = mapsUrl(place);
+      return;
+    }
+    const appname = encodeURIComponent(window.location.hostname);
+    const appUrl =
+      `nmap://route/public?dlat=${lat}&dlng=${lng}` +
+      `&dname=${encodeURIComponent(place)}&appname=${appname}`;
+    let switched = false;
+    const onHide = () => { switched = true; };
+    document.addEventListener("visibilitychange", onHide, { once: true });
+    window.location.href = appUrl;
+    setTimeout(() => {
+      document.removeEventListener("visibilitychange", onHide);
+      if (!switched && !document.hidden) window.location.href = mapsUrl(place);
+    }, 1200);
+    return;
+  }  
     }
 
     // Citymapperアプリを直接呼び出す。アプリが無ければウェブ版に切り替わる。
