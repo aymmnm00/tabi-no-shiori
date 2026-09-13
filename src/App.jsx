@@ -186,6 +186,9 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .wish-chip.on { background:linear-gradient(135deg,#3FA9E0,#5FBEEA); color:white; }
 .travel-row { display:flex; align-items:center; justify-content:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--sky-deep); opacity:0.85; padding:2px 0; }
 .travel-bar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; background:white; border-radius:16px; padding:9px 12px; margin-bottom:10px; box-shadow:0 3px 10px rgba(63,169,224,0.07); }
+.offline-bar { background:#FFF3D6; color:#B8862E; font-size:12px; text-align:center; padding:6px; font-weight:700; }
+.rate-bar { display:flex; align-items:center; gap:8px; font-size:11.5px; font-weight:700; color:var(--sky-deep); background:#F3FAFE; border-radius:10px; padding:6px 10px; margin-top:6px; flex-wrap:wrap; }
+.rate-date { font-weight:500; opacity:0.6; margin-left:4px; }
 .settle-box { background:linear-gradient(135deg,#EAF6FB,#F5FBFD); border-radius:16px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
 .settle-title { font-family:'Zen Maru Gothic', sans-serif; font-weight:700; font-size:13px; color:var(--navy); }
 .settle-row { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--navy); }
@@ -252,6 +255,36 @@ const TODO_PHASES = [
   { key: "post", label: "旅行後" },
 ];
 const catInfo = (key) => CATEGORIES.find((c) => c.key === key) || CATEGORIES[4];
+
+// 対応通貨(ECBが公表しているもの)
+const CURRENCIES = [
+  { code: "EUR", label: "ユーロ", sign: "€" },
+  { code: "KRW", label: "韓国ウォン", sign: "₩" },
+  { code: "USD", label: "米ドル", sign: "$" },
+  { code: "GBP", label: "英ポンド", sign: "£" },
+  { code: "CHF", label: "スイスフラン", sign: "CHF" },
+  { code: "THB", label: "タイバーツ", sign: "฿" },
+  { code: "SGD", label: "シンガポールドル", sign: "S$" },
+  { code: "AUD", label: "豪ドル", sign: "A$" },
+  { code: "CNY", label: "中国元", sign: "¥" },
+  { code: "HKD", label: "香港ドル", sign: "HK$" },
+  { code: "TRY", label: "トルコリラ", sign: "₺" },
+  { code: "CAD", label: "カナダドル", sign: "C$" },
+];
+const currencyInfo = (code) => CURRENCIES.find((c) => c.code === code);
+
+// 為替レートを取得する(無料・登録不要のFrankfurter API / ECBのデータ)
+// 1通貨あたり何円かを返す。取れなければ null。
+async function fetchRate(code) {
+  try {
+    const res = await fetch(`https://api.frankfurter.app/latest?from=${code}&to=JPY`);
+    const data = await res.json();
+    if (data && data.rates && data.rates.JPY) {
+      return { value: data.rates.JPY, date: data.date };
+    }
+  } catch (e) { /* 取得できなければnull */ }
+  return null;
+}
 
 /* ---- 合言葉(簡易ロック) ----
    注意:これは「うっかり見えてしまう」のを防ぐ簡易的な仕組みです。
@@ -598,44 +631,68 @@ async function lookupCoords(place) {
 function openLocationLink(place, provider, coords) {
   if (!place) return;
 
-  const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
-  const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
-
-  // アプリを開き、開けなければGoogleマップに切り替える共通処理
-  const openApp = (appUrl) => {
-    let switched = false;
-    const onHide = () => { switched = true; };
-    document.addEventListener("visibilitychange", onHide, { once: true });
-    window.location.href = appUrl;
-    setTimeout(() => {
-      document.removeEventListener("visibilitychange", onHide);
-      if (!switched && !document.hidden) window.location.href = mapsUrl(place);
-    }, 1200);
-  };
-
   if (provider === "citymapper") {
+    const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
+    const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
+
+    // 座標が分かっていない場合は、Googleマップで開く(Citymapperは座標がないと目的地を認識しないため)
     if (lat === null || lng === null) {
       window.location.href = mapsUrl(place);
       return;
     }
-    openApp(`citymapper://directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`);
+
+    // Citymapperアプリを直接呼び出す。アプリが無ければウェブ版に切り替わる。
+    const appUrl = `citymapper://directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`;
+    const webUrl = `https://citymapper.com/directions?endcoord=${lat},${lng}&endname=${encodeURIComponent(place)}`;
+
+    let switched = false;
+    const onHide = () => { switched = true; };
+    document.addEventListener("visibilitychange", onHide, { once: true });
+
+    window.location.href = appUrl;
+
+    // アプリが開かなかった場合だけ、ウェブ版に飛ばす
+    setTimeout(() => {
+      document.removeEventListener("visibilitychange", onHide);
+      if (!switched && !document.hidden) window.location.href = webUrl;
+    }, 1200);
     return;
   }
 
   if (provider === "naver") {
+    const lat = coords && typeof coords.lat === "number" ? coords.lat : null;
+    const lng = coords && typeof coords.lng === "number" ? coords.lng : null;
+
+    // NAVERマップは韓国国内専用。座標が無い、または韓国の範囲外ならGoogleマップで開く
     const inKorea = lat !== null && lng !== null &&
       lat >= 31.43 && lat <= 44.35 && lng >= 122.37 && lng <= 132.0;
     if (!inKorea) {
       window.location.href = mapsUrl(place);
       return;
     }
+
+    // NAVERマップアプリで経路案内を開く(アプリが無ければGoogleマップに切り替わる)
     const appname = encodeURIComponent(window.location.hostname);
-    openApp(`nmap://route/public?dlat=${lat}&dlng=${lng}&dname=${encodeURIComponent(place)}&appname=${appname}`);
+    const appUrl =
+      `nmap://route/public?dlat=${lat}&dlng=${lng}` +
+      `&dname=${encodeURIComponent(place)}&appname=${appname}`;
+
+    let switched = false;
+    const onHide = () => { switched = true; };
+    document.addEventListener("visibilitychange", onHide, { once: true });
+
+    window.location.href = appUrl;
+
+    setTimeout(() => {
+      document.removeEventListener("visibilitychange", onHide);
+      if (!switched && !document.hidden) window.location.href = mapsUrl(place);
+    }, 1200);
     return;
   }
 
   window.location.href = mapsUrl(place);
 }
+
 /* ============================== サンプルデータ ============================== */
 const sampleTrips = [
   {
@@ -1131,7 +1188,10 @@ function TripFormPanel({ initial, onSave, onClose }) {
             <button className={`tz-btn${mapProvider === "citymapper" ? " active" : ""}`} onClick={() => setMapProvider("citymapper")} type="button">Citymapper</button>
             <button className={`tz-btn${mapProvider === "naver" ? " active" : ""}`} onClick={() => setMapProvider("naver")} type="button">NAVER</button>
           </div>
-          <div className="field-hint">場所をタップしたときに開く地図アプリです。Citymapperは公共交通機関が充実した都市向けです(パリなど)。</div>
+          <div className="field-hint">
+            場所をタップしたときに開く地図アプリです。Citymapperは公共交通機関が充実した都市向け(パリなど)、
+            NAVERは韓国旅行向けです。対応していない場所は自動でGoogleマップが開きます。
+          </div>
 
           <label className="field-label">合言葉(任意)</label>
           <input className="field-input" placeholder="例:hawaii2026" value={passcode} onChange={(e) => setPasscode(e.target.value)} />
@@ -2062,7 +2122,7 @@ function MapTab({ trip, updateTrip }) {
         {busy ? "調べています…" : "場所の位置を自動で調べる"}
       </button>
       <div className="field-hint">
-        場所の名前から位置を自動で調べます。うまく見つからない場所は、日程や行きたいところの入力欄で
+        場所の名前から位置を自動で調べます。うまく見つからない場所は、日程やスポットの入力欄で
         緯度・経度を直接入力すると地図に出ます。
       </div>
 
@@ -2102,11 +2162,27 @@ function SplitTab({ trip, updateTrip }) {
   const [payerId, setPayerId] = useState(members[0]?.id || null);
   const [forIds, setForIds] = useState(members.map((m) => m.id));
   const [deletingId, setDeletingId] = useState(null);
+  const [inLocal, setInLocal] = useState(false);   // 現地通貨で入力するか
+  const [rateBusy, setRateBusy] = useState(false);
+
+  const cur = trip.currency ? currencyInfo(trip.currency) : null;
+  const rate = trip.rate || null;   // { value, date }
+
+  // レートを取り直す
+  const refreshRate = async () => {
+    if (!trip.currency) return;
+    setRateBusy(true);
+    const r = await fetchRate(trip.currency);
+    if (r) updateTrip({ ...trip, rate: r });
+    setRateBusy(false);
+  };
 
   const setList = (l) => updateTrip({ ...trip, expenses: l });
 
   const add = () => {
-    const yen = Number(amount);
+    const input = Number(amount);
+    // 現地通貨で入力された場合はレートで円に換算して保存する
+    const yen = inLocal && rate ? Math.round(input * rate.value) : input;
     if (!title.trim() || !yen || !payerId || forIds.length === 0) return;
     setList([...expenses, {
       id: newId(), title: title.trim(), amount: yen, payerId, forIds: [...forIds],
@@ -2164,11 +2240,56 @@ function SplitTab({ trip, updateTrip }) {
   return (
     <div className="tab-content">
       <div className="mini-form">
+        <label className="field-label">現地通貨</label>
+        <select
+          className="field-input"
+          value={trip.currency || ""}
+          onChange={async (e) => {
+            const code = e.target.value || null;
+            updateTrip({ ...trip, currency: code, rate: null });
+            if (code) {
+              setRateBusy(true);
+              const r = await fetchRate(code);
+              if (r) updateTrip({ ...trip, currency: code, rate: r });
+              setRateBusy(false);
+            }
+          }}
+        >
+          <option value="">使わない(円だけ)</option>
+          {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}({c.code})</option>)}
+        </select>
+
+        {cur && (
+          <div className="rate-bar">
+            {rate ? (
+              <span>1 {cur.code} = {rate.value.toFixed(2)} 円<span className="rate-date">({rate.date}時点)</span></span>
+            ) : (
+              <span className="rate-date">レート未取得</span>
+            )}
+            <button className="link-btn" onClick={refreshRate} disabled={rateBusy}>
+              {rateBusy ? "取得中…" : "更新"}
+            </button>
+          </div>
+        )}
+
         <label className="field-label">何の費用?</label>
         <input className="field-input" placeholder="例:タパス代" value={title} onChange={(e) => setTitle(e.target.value)} />
 
-        <label className="field-label">金額(円)</label>
-        <input type="number" inputMode="numeric" className="field-input" placeholder="例:6000" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <label className="field-label">金額</label>
+        {cur && rate && (
+          <div className="tz-toggle" style={{ marginBottom: 6 }}>
+            <button className={`tz-btn${!inLocal ? " active" : ""}`} onClick={() => setInLocal(false)} type="button">円で入力</button>
+            <button className={`tz-btn${inLocal ? " active" : ""}`} onClick={() => setInLocal(true)} type="button">{cur.code}で入力</button>
+          </div>
+        )}
+        <input
+          type="number" inputMode="decimal" className="field-input"
+          placeholder={inLocal && cur ? `例:35(${cur.code})` : "例:6000(円)"}
+          value={amount} onChange={(e) => setAmount(e.target.value)}
+        />
+        {inLocal && rate && amount && (
+          <div className="field-hint">= 約 ¥{Math.round(Number(amount) * rate.value).toLocaleString()}</div>
+        )}
 
         <label className="field-label">払った人</label>
         <MemberSelect members={members} value={payerId} onChange={(id) => setPayerId(id || payerId)} />
@@ -2635,6 +2756,22 @@ export default function App() {
   };
 
   const shrinkDone = useRef(false);
+  const [offline, setOffline] = useState(!navigator.onLine);
+
+  // オフライン対応:ページの部品を端末に保存しておく
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
 
   // Firestoreをリアルタイム監視(家族の誰かの編集がすぐ反映される)
   useEffect(() => {
@@ -2715,6 +2852,7 @@ export default function App() {
   return (
     <div className="app-root">
       <style>{STYLES}</style>
+      {offline && <div className="offline-bar">オフラインです。編集内容は電波が戻ったときに保存されます</div>}
       {saveError && <div className="save-error">{typeof saveError === "string" ? saveError : "保存できませんでした。通信環境をご確認ください"}</div>}
       {toast && <div className="save-error">{toast}</div>}
 
