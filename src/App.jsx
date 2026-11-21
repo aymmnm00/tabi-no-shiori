@@ -223,6 +223,8 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .thumb-pick.small { width:36px; height:36px; }
 .thumb-zoom { position:absolute; left:0; right:0; top:100%; z-index:10; background:white; border-radius:14px; padding:8px; box-shadow:0 6px 20px rgba(63,169,224,0.22); }
 .thumb-zoom img { width:100%; border-radius:10px; display:block; }
+.sched-photo { width:72px; height:72px; object-fit:cover; border-radius:10px; margin-top:8px; display:block; cursor:pointer; transition:width 0.15s, height 0.15s; }
+.sched-photo.zoom { width:100%; height:auto; max-height:260px; }
 .wish-photo { width:100%; max-height:170px; object-fit:cover; border-radius:12px; margin-top:8px; display:block; }
 .wish-memo { font-size:11.5px; opacity:0.75; margin-top:4px; line-height:1.5; white-space:pre-wrap; }
 .wish-photo-preview { width:100%; max-height:150px; object-fit:cover; border-radius:12px; margin-top:6px; display:block; }
@@ -444,6 +446,21 @@ async function shrinkTripImages(trips) {
           changed = true;
         } else t.members.push(m);
       }
+    }
+    // 日程の予定に付けた参考画像
+    if (trip.days && typeof trip.days === "object") {
+      const days = {};
+      for (const [d, items] of Object.entries(trip.days)) {
+        const list = [];
+        for (const it of (items || [])) {
+          if (it?.photo && it.photo.length > 120000) {
+            list.push({ ...it, photo: await shrinkDataUrl(it.photo, 400) });
+            changed = true;
+          } else list.push(it);
+        }
+        days[d] = list;
+      }
+      t.days = days;
     }
     if (Array.isArray(t.wishlist)) {
       t.wishlist = [];
@@ -1252,11 +1269,20 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
   const [memo, setMemo] = useState(initial?.memo || "");
   const [coord, setCoord] = useState(typeof initial?.lat === "number" ? `${initial.lat}, ${initial.lng}` : "");
   const [pickSpot, setPickSpot] = useState(false);   // スポット一覧を開いているか
+  const [photo, setPhoto] = useState(initial?.photo || null);   // 参考画像
+
+  // 選んだ画像を圧縮して読み込む
+  const pickPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try { setPhoto(await readImageCompressed(file, 400)); } catch (err) { /* 失敗時は何もしない */ }
+  };
 
   // スポットの内容を予定の入力欄に流し込む
   const applySpot = (w) => {
     setTitle(w.name);
     setLocation(w.name);
+    if (w.photo) setPhoto(w.photo);
     if (typeof w.lat === "number") setCoord(`${w.lat}, ${w.lng}`);
     if (w.memo) setMemo(w.memo);
     setPickSpot(false);
@@ -1272,6 +1298,7 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
       title: title.trim(), category, location, arrivalLocation,
       arrivalIsLocalTime: endTime ? arrivalIsLocalTime : undefined,
       memo, reservationNumber, timeZone: intl ? timeZone : "jst",
+      photo: photo || undefined,
       ...(() => {
         const m = coord.split(",").map((x) => Number(x.trim()));
         return (m.length === 2 && !isNaN(m[0]) && !isNaN(m[1])) ? { lat: m[0], lng: m[1] } : {};
@@ -1359,6 +1386,15 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
       <input className="field-input" placeholder="例:48.8584, 2.2945" value={coord} onChange={(e) => setCoord(e.target.value)} />
       <div className="field-hint">地図タブに出したいときに使います。空欄でも「場所の位置を自動で調べる」で埋められます</div>
 
+      <label className="field-label">参考画像(任意)</label>
+      <input type="file" accept="image/*" className="field-input" onChange={pickPhoto} />
+      {photo && (
+        <>
+          <img src={photo} alt="" className="wish-photo-preview" />
+          <button className="link-btn danger" type="button" style={{ alignSelf: "flex-start" }} onClick={() => setPhoto(null)}>画像を削除</button>
+        </>
+      )}
+
       <div className="form-actions">
         <button className="btn-mini full" disabled={!canSave} onClick={save}>保存する</button>
         <button className="btn-secondary full" onClick={onCancel}>やめる</button>
@@ -1370,6 +1406,7 @@ function ScheduleForm({ initial, trip, onSave, onCancel }) {
 /* ============================== 予定カード ============================== */
 function ScheduleCard({ item, trip, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
+  const [zoom, setZoom] = useState(false);   // 参考画像を大きく見ているか
   const cat = catInfo(item.category);
   const intl = trip.isInternational && trip.timeDiffHours;
 
@@ -1404,6 +1441,13 @@ function ScheduleCard({ item, trip, onEdit, onDelete }) {
           {item.reservationNumber && <span className="meta-tag"><Ticket size={11} />{item.reservationNumber}</span>}
           {item.memo && <span className="meta-memo">{item.memo}</span>}
         </div>
+        {item.photo && (
+          <img
+            src={item.photo} alt=""
+            className={zoom ? "sched-photo zoom" : "sched-photo"}
+            onClick={(e) => { e.stopPropagation(); setZoom(!zoom); }}
+          />
+        )}
         {confirming && (
           <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
             <ConfirmDelete message="削除しますか?" onConfirm={onDelete} onCancel={() => setConfirming(false)} />
@@ -1794,6 +1838,7 @@ function WishlistTab({ trip, updateTrip }) {
       location: w.name,
       memo: w.memo || "",
       timeZone: "jst",
+      ...(w.photo ? { photo: w.photo } : {}),
       ...(typeof w.lat === "number" ? { lat: w.lat, lng: w.lng } : {}),
     };
     const days = trip.days || {};
