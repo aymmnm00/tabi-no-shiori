@@ -223,8 +223,8 @@ input[type="time"].field-input, input[type="date"].field-input { -webkit-appeara
 .thumb-pick.small { width:36px; height:36px; }
 .thumb-zoom { position:absolute; left:0; right:0; top:100%; z-index:10; background:white; border-radius:14px; padding:8px; box-shadow:0 6px 20px rgba(63,169,224,0.22); }
 .thumb-zoom img { width:100%; border-radius:10px; display:block; }
-.sched-photo { width:72px; height:72px; object-fit:cover; border-radius:10px; margin-top:8px; display:block; cursor:pointer; transition:width 0.15s, height 0.15s; }
-.sched-photo.zoom { width:100%; height:auto; max-height:260px; }
+.sched-thumb { width:34px; height:34px; object-fit:cover; border-radius:8px; cursor:pointer; flex-shrink:0; box-shadow:0 1px 4px rgba(63,169,224,0.18); }
+.sched-photo.zoom { width:100%; height:auto; max-height:260px; object-fit:cover; border-radius:10px; margin-top:8px; display:block; cursor:pointer; }
 .wish-photo { width:100%; max-height:170px; object-fit:cover; border-radius:12px; margin-top:8px; display:block; }
 .wish-memo { font-size:11.5px; opacity:0.75; margin-top:4px; line-height:1.5; white-space:pre-wrap; }
 .wish-photo-preview { width:100%; max-height:150px; object-fit:cover; border-radius:12px; margin-top:6px; display:block; }
@@ -1426,6 +1426,12 @@ function ScheduleCard({ item, trip, onEdit, onDelete }) {
         <div className="schedule-top">
           <span className="cat-badge" style={{ background: cat.bg, color: cat.fg }}>{item.category}</span>
           <span className="schedule-title">{item.title}</span>
+          {item.photo && !zoom && (
+            <img
+              src={item.photo} alt="" className="sched-thumb"
+              onClick={(e) => { e.stopPropagation(); setZoom(true); }}
+            />
+          )}
         </div>
         <div className="schedule-meta">
           {item.location && (
@@ -1441,11 +1447,10 @@ function ScheduleCard({ item, trip, onEdit, onDelete }) {
           {item.reservationNumber && <span className="meta-tag"><Ticket size={11} />{item.reservationNumber}</span>}
           {item.memo && <span className="meta-memo">{item.memo}</span>}
         </div>
-        {item.photo && (
+        {item.photo && zoom && (
           <img
-            src={item.photo} alt=""
-            className={zoom ? "sched-photo zoom" : "sched-photo"}
-            onClick={(e) => { e.stopPropagation(); setZoom(!zoom); }}
+            src={item.photo} alt="" className="sched-photo zoom"
+            onClick={(e) => { e.stopPropagation(); setZoom(false); }}
           />
         )}
         {confirming && (
